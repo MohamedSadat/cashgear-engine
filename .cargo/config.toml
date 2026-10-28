@@ -1,4 +1,7 @@
 [alias]
-# The wasm check run at the start and end of every phase and in CI.
+# The wasm check run at the start and end of every phase.
 # Desktop-only tools are excluded.
 check-wasm = "check --workspace --target wasm32-unknown-unknown --exclude cg_editor --exclude cg_pack"
+# The same, linted with warnings denied, so wasm-only code paths are held to the desktop bar.
+# CI runs this one.
+clippy-wasm = "clippy --workspace --target wasm32-unknown-unknown --exclude cg_editor --exclude cg_pack -- -D warnings"

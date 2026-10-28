@@ -1,0 +1,15 @@
+[package]
+name = "hello_window"
+description = "CashGear Engine example: a window that runs the game loop and logs input on desktop and web."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cashgear_engine.workspace = true
+
+[lints]
+workspace = true

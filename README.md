@@ -2,7 +2,7 @@
 
 CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WASM) and Android, built with `winit`, `wgpu` and `bevy_ecs`. A sample platformer (`games/platformer`) proves it. The engine is built in 15 phases; see [docs/PLAN.md](docs/PLAN.md) for the plan and [docs/PROGRESS.md](docs/PROGRESS.md) for where it stands.
 
-> **Status:** Phase 0. The workspace, CI and docs are in place, and every crate is still an empty skeleton.
+> **Status:** Phase 1. `cg_core` (app, plugins, fixed-timestep loop, `Time`) and `cg_platform` (window, input, actions, lifecycle, logging) work on desktop and web. Rendering arrives in Phase 2.
 
 ## Workspace layout
 
@@ -25,6 +25,22 @@ CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WAS
 | `tools/cg_editor` | Desktop scene editor | 13 |
 | `examples/` | One runnable example per feature | from 1 |
 
+## Examples
+
+Each example is its own binary crate under `examples/`, with an `index.html` for the web build.
+
+| Example | Shows |
+| --- | --- |
+| `hello_window` | The window, the game loop and input logging on desktop and web |
+
+```sh
+cargo run -p hello_window                  # desktop
+cargo run -p hello_window -- --frames 120  # run 120 frames, then exit (every example)
+
+cargo install trunk --locked               # once
+cd examples/hello_window && trunk serve    # web: open http://127.0.0.1:8080
+```
+
 ## Development
 
 The toolchain is pinned in `rust-toolchain.toml` (Rust 1.99.1, with the `wasm32-unknown-unknown` target). `rustup` installs it on first use.
@@ -35,13 +51,14 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 cargo check-wasm   # alias: cargo check for wasm32-unknown-unknown, desktop tools excluded
+cargo clippy-wasm  # alias: the same, linted with warnings denied (CI runs this)
 ```
 
 CI runs all of these on Windows and Ubuntu for every push to `main` and every pull request.
 
 ### Portability rules
 
-Engine and game crates must build for every target. Only `cg_platform` may use `#[cfg(target_os/arch)]`, and the root `clippy.toml` rejects calls that break on the web: `std::time::Instant::now`, `std::thread::spawn` and direct `std::fs` access. The full rules are in [docs/PLAN.md](docs/PLAN.md#portability-rules-apply-from-phase-1).
+Engine and game crates must build for every target. Only `cg_platform` may use `#[cfg(target_os/arch)]`, and the root `clippy.toml` rejects calls that break on the web: `std::time::Instant::now`, `std::thread::spawn` and direct `std::fs` access. Game and engine code read time from the `Time` resource. The full rules are in [docs/PLAN.md](docs/PLAN.md#portability-rules-apply-from-phase-1).
 
 ## License
 

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "games/*", "tools/*"]
+members = ["crates/*", "examples/*", "games/*", "tools/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -25,6 +25,21 @@ cg_script = { path = "crates/cg_script" }
 cg_tiled = { path = "crates/cg_tiled" }
 cg_ui = { path = "crates/cg_ui" }
 cg_world = { path = "crates/cg_world" }
+
+# External dependencies.
+bevy_ecs = { version = "0.20.1", default-features = false, features = ["std", "async_executor"] }
+console_error_panic_hook = "0.1.7"
+console_log = "1.1.0"
+env_logger = "0.11.11"
+gilrs = "0.11.2"
+glam = "0.34.1"
+log = "0.4.34"
+ron = "0.12.3"
+serde = { version = "1.0.229", features = ["derive"] }
+wasm-bindgen = "0.2.129"
+web-sys = "0.3.106"
+web-time = "1.1.0"
+winit = "0.30.13"
 
 [workspace.lints.rust]
 missing_docs = "warn"

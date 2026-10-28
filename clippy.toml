@@ -2,9 +2,11 @@
 # These calls panic on wasm32-unknown-unknown, block the frame, or bypass the asset IO API.
 # Platform backends that really need one opt out locally with
 # `#[allow(clippy::disallowed_methods)]`; desktop-only tools have their own clippy.toml.
+# Note: on desktop `web_time::Instant` *is* `std::time::Instant`, so the guard flags
+# `web_time::Instant::now()` too. Engine code gets time from the `Time` resource instead.
 disallowed-methods = [
-    { path = "std::time::Instant::now", reason = "panics on wasm; use `web_time::Instant`" },
-    { path = "std::time::SystemTime::now", reason = "panics on wasm; use `web_time::SystemTime`" },
+    { path = "std::time::Instant::now", reason = "panics on wasm; read the `Time` resource (only the cg_platform runner reads the clock, via `web_time`)" },
+    { path = "std::time::SystemTime::now", reason = "panics on wasm; use `web_time::SystemTime` inside cg_platform" },
     { path = "std::thread::spawn", reason = "no threads on wasm; use the engine task abstraction" },
     { path = "std::thread::sleep", reason = "blocks the frame and is unavailable on wasm" },
     { path = "std::fs::read", reason = "no filesystem on web/Android; use the asset IO API" },

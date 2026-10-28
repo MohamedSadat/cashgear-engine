@@ -32,10 +32,19 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
+      - name: Linux packages
+        if: runner.os == 'Linux'
+        # libudev for gilrs; Xvfb and xkbcommon-x11 for the headless example run.
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libxkbcommon-x11-0 xvfb
       - uses: actions-rust-lang/setup-rust-toolchain@v2
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         run: cargo test --workspace
       - name: wasm check
-        run: cargo check-wasm
+        run: cargo clippy-wasm
+      - name: examples (--frames)
+        shell: bash
+        run: |
+          run() { if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a "$@"; else "$@"; fi; }
+          run cargo run -p hello_window -- --frames 60
