@@ -1,0 +1,12 @@
+[package]
+name = "cg_audio"
+description = "CashGear Engine audio: kira wrapper, buses and positional pan."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,12 @@
+[package]
+name = "cg_anim"
+description = "CashGear Engine animation: sprite clips, state machines, tweens and particles."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

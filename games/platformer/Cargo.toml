@@ -1,0 +1,15 @@
+[package]
+name = "platformer"
+description = "CashGear Engine sample game: a short 2D platformer."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cashgear_engine.workspace = true
+
+[lints]
+workspace = true

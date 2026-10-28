@@ -1,0 +1,15 @@
+[package]
+name = "cg_pack"
+description = "CashGear Engine asset CLI: atlas packing and asset bundling."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cashgear_engine.workspace = true
+
+[lints]
+workspace = true

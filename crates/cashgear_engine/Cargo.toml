@@ -1,0 +1,30 @@
+[package]
+name = "cashgear_engine"
+description = "CashGear Engine: a 2D game engine for desktop, web and Android."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# Lua scripting. Off by default because `mlua` does not build for wasm32-unknown-unknown.
+script = ["dep:cg_script"]
+
+[dependencies]
+cg_anim.workspace = true
+cg_assets.workspace = true
+cg_audio.workspace = true
+cg_core.workspace = true
+cg_physics.workspace = true
+cg_platform.workspace = true
+cg_render.workspace = true
+cg_script = { workspace = true, optional = true }
+cg_tiled.workspace = true
+cg_ui.workspace = true
+cg_world.workspace = true
+
+[lints]
+workspace = true

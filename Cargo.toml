@@ -1,0 +1,30 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "games/*", "tools/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/MohamedSadat/cashgear-engine"
+publish = false
+
+# Internal crates. External dependencies are pinned here too, starting in Phase 1;
+# upgrade them only between phases.
+[workspace.dependencies]
+cashgear_engine = { path = "crates/cashgear_engine" }
+cg_anim = { path = "crates/cg_anim" }
+cg_assets = { path = "crates/cg_assets" }
+cg_audio = { path = "crates/cg_audio" }
+cg_core = { path = "crates/cg_core" }
+cg_physics = { path = "crates/cg_physics" }
+cg_platform = { path = "crates/cg_platform" }
+cg_render = { path = "crates/cg_render" }
+cg_script = { path = "crates/cg_script" }
+cg_tiled = { path = "crates/cg_tiled" }
+cg_ui = { path = "crates/cg_ui" }
+cg_world = { path = "crates/cg_world" }
+
+[workspace.lints.rust]
+missing_docs = "warn"

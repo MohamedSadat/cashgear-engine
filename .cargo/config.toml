@@ -1,0 +1,4 @@
+[alias]
+# The wasm check run at the start and end of every phase and in CI.
+# Desktop-only tools are excluded.
+check-wasm = "check --workspace --target wasm32-unknown-unknown --exclude cg_editor --exclude cg_pack"

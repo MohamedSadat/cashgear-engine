@@ -1,0 +1,17 @@
+# Portability guard for engine and game crates (docs/PLAN.md, "Portability rules").
+# These calls panic on wasm32-unknown-unknown, block the frame, or bypass the asset IO API.
+# Platform backends that really need one opt out locally with
+# `#[allow(clippy::disallowed_methods)]`; desktop-only tools have their own clippy.toml.
+disallowed-methods = [
+    { path = "std::time::Instant::now", reason = "panics on wasm; use `web_time::Instant`" },
+    { path = "std::time::SystemTime::now", reason = "panics on wasm; use `web_time::SystemTime`" },
+    { path = "std::thread::spawn", reason = "no threads on wasm; use the engine task abstraction" },
+    { path = "std::thread::sleep", reason = "blocks the frame and is unavailable on wasm" },
+    { path = "std::fs::read", reason = "no filesystem on web/Android; use the asset IO API" },
+    { path = "std::fs::read_to_string", reason = "no filesystem on web/Android; use the asset IO API" },
+    { path = "std::fs::write", reason = "no filesystem on web/Android; use the `Storage` trait" },
+    { path = "std::fs::read_dir", reason = "no filesystem on web/Android; use the asset IO API" },
+    { path = "std::fs::create_dir_all", reason = "no filesystem on web/Android; use the `Storage` trait" },
+    { path = "std::fs::File::open", reason = "no filesystem on web/Android; use the asset IO API" },
+    { path = "std::fs::File::create", reason = "no filesystem on web/Android; use the `Storage` trait" },
+]

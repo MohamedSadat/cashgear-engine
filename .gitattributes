@@ -1,0 +1,10 @@
+# Keep LF everywhere so rustfmt agrees on Windows and Linux.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ogg binary
+*.wav binary
+*.ttf binary
+*.otf binary
+*.wasm binary

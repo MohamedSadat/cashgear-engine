@@ -1,0 +1,2 @@
+# Desktop-only tool: the portability guard in the root clippy.toml does not apply,
+# so std::fs and threads are allowed here.
