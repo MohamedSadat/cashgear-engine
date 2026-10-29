@@ -13,7 +13,7 @@
 //! | [`Camera2D`] | The view: zoom and [`ScalingMode`], placed by the entity's transform |
 //!
 //! Each frame [`RenderPlugin`] picks the active camera, adds the visible sprites inside its
-//! view to the [`Sprites`] queue, draws everything in the [`Render`](cg_core::Render)
+//! view to the [`Sprites`] queue, draws everything in the [`Render`]
 //! schedule and empties the queues. Systems can also draw directly through the queues:
 //!
 //! | Resource | Holds |

@@ -8,6 +8,7 @@
 //! | [`Tilemap`] | Draws a map at the entity and spawns its objects as children |
 //! | [`TiledObject`] | What the map says about an object entity: id, name, class, shape, properties |
 //! | [`TmxLoader`] | Reads `.tmx` files, with `.tsx` tilesets and `.tx` templates |
+//! | [`TileAnimation`] | Plays Tiled's tile animations on tile objects (tile layers play them by themselves) |
 //!
 //! ```
 //! use cg_assets::AssetServer;
@@ -29,26 +30,29 @@
 //! # use cg_world::GlobalTransform2D;
 //! ```
 //!
-//! Maps are orthogonal; isometric and hexagonal maps, image-collection tilesets and tile
-//! animations are not supported yet. With hot reloading on, saving the map, a tileset or a
-//! template in Tiled rebuilds the map in the running game, and saving a tileset image
-//! reloads the texture.
+//! Maps are orthogonal; isometric and hexagonal maps and image-collection tilesets are not
+//! supported yet. Tiles animated in Tiled's tile animation editor play in tile layers and
+//! on tile objects. With hot reloading on, saving the map, a tileset or a template in
+//! Tiled rebuilds the map in the running game, and saving a tileset image reloads the
+//! texture.
 
+mod animation;
 mod draw;
 mod loader;
 mod map;
 mod spawn;
 
+pub use animation::TileAnimation;
 pub use loader::TmxLoader;
 pub use map::{
     ImageLayer, LayerKind, LayerTile, MapLayer, MapObject, ObjectShape, Properties, PropertyValue,
-    TileInfo, TileLayer, TiledMap, Tileset,
+    TileFrame, TileInfo, TileLayer, TiledMap, Tileset,
 };
 pub use spawn::{TiledObject, Tilemap, TilemapData, TilemapState};
 
 use bevy_ecs::schedule::IntoScheduleConfigs;
 use cg_assets::AppAssetExt;
-use cg_core::{App, Plugin, PreUpdate, Render};
+use cg_core::{App, Plugin, PostUpdate, PreUpdate, Render};
 use cg_render::{RenderPlugin, RenderSystems};
 use cg_world::AppWorldExt;
 
@@ -69,6 +73,7 @@ impl Plugin for TiledPlugin {
             .register_loader(TmxLoader)
             .register_prefab_component::<Tilemap>("Tilemap")
             .add_systems(PreUpdate, spawn::build_tilemaps)
+            .add_systems(PostUpdate, animation::animate_tile_objects)
             .add_systems(
                 Render,
                 draw::queue_tilemaps
@@ -78,9 +83,9 @@ impl Plugin for TiledPlugin {
     }
 }
 
-/// Common imports: the plugin, the map asset and the components.
+/// Common imports: the plugin, the map asset, the components and tile animations.
 pub mod prelude {
-    pub use crate::{TiledMap, TiledObject, TiledPlugin, Tilemap};
+    pub use crate::{TileAnimation, TiledMap, TiledObject, TiledPlugin, Tilemap};
 }
 
 #[cfg(test)]

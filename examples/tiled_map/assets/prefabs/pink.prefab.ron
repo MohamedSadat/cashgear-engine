@@ -1,9 +1,9 @@
 // A walking enemy. The map places it and can tune its patrol with a `Patrol` class
-// property; the picture comes from the packed character atlas, two frames by name.
+// property; the picture is the `pink` clip of the character sheet built from
+// the packed atlas.
 (
     components: {
-        "AtlasSprite": (atlas: "atlases/characters.atlas.ron", region: "pink_0"),
-        "Frames": (regions: ["pink_0", "pink_1"], fps: 6),
+        "SpriteAnimation": (sheet: "generated/characters.sheet", clip: "pink"),
         "Patrol": (speed: 30, distance: 48),
     },
 )

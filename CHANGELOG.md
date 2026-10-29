@@ -3,6 +3,30 @@
 All notable changes to CashGear Engine are recorded here, one section per phase.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Phase 6 — Animation and effects
+
+### Added
+
+- `cg_anim`: `SpriteSheet` assets, frames cut from one image with named `AnimationClip`s (frames with durations, a `Direction` of forward, reverse, ping-pong or ping-pong reverse, an optional repeat count, and `ClipEvent`s on frames). `AsepriteLoader` reads Aseprite sheet exports (`.json`, "Hash" or "Array" layout): frame durations, trimmed frames (pivots stay put), tags as clips with their direction and repeat count, and events from tag user data (`0:footstep, 3:footstep`). `SpriteSheet::from_atlas` and `clip_from_frames` build sheets in code from `cg_pack` atlases.
+- `cg_anim`: the `SpriteAnimation` component plays a clip on the entity's `Sprite` in fixed steps (texture, source and pivot; trimmed frames mirror around the pivot when flipped), with speed, pause, `play` and `restart_with`, and sends `AnimationEvent` and `AnimationFinished` messages. A new or switched clip shows at once.
+- `cg_anim`: animation state machines. `AnimationGraph` assets (`.anim.ron`, checked on load, or built in code) hold states (a clip, a speed, optionally scaled by a parameter) and transitions (from states or any state, conditions on number, true/false and trigger parameters, after the clip finishes, after a minimum time). The `Animator` component runs one from parameters the game sets (`set`, `set_bool`, `trigger`, `force`) and sends `AnimationStateChanged`.
+- `cg_anim`: tweens. `Tween` eases a translation, scale, rotation, sprite colour, sprite flash or camera zoom with any of 31 `Ease` curves, with a start value, delay, repeats, yoyo, a tag and a follow-up tween (`then`). `Tweens` holds an entity's tweens; `commands.entity(e).tween(...)` starts one; `TweenFinished` reports the end. Transform tweens on interpolated entities run in fixed steps, the rest every frame.
+- `cg_anim`: CPU particles. `ParticleEmitter` emits at a rate, in a start burst or on demand (`emit`), from a point, rectangle or circle, with lifetime, speed, direction and spread, gravity, drag, size and colour over life, rotation and spin, world or local space, and a per-emitter cap; one-shot emitters despawn when done. Particles are drawn through the sprite batcher and culled per emitter. `ParticleBudget` caps the live total (16,384 by default, `AnimPlugin::particle_budget`).
+- `cg_anim`: `CameraFollow` (a dead zone, smoothing, an offset and level bounds; `snap` after a teleport), `CameraShake` (trauma-based, from smooth noise, moving only the drawn view), and the drawn view kept inside the bounds every frame.
+- `cg_anim`: `ScreenFade` (fade the screen to a colour and back, on real time) and `StateFade<S>` with `add_state_fade::<S>()`, which changes game state behind a fade.
+- `cg_anim`: `AnimPlugin`, `AnimSystems` and a prelude. `SpriteAnimation`, `Animator`, `ParticleEmitter` and `CameraShake` are prefab components.
+- `cg_render`: `Sprite::flash`, a colour the sprite is mixed towards by its alpha (in linear light, keeping the sprite's transparency), for hit flashes. Sprite instances carry it as four bytes.
+- `cg_tiled`: tile animations made in Tiled's tile animation editor play in tile layers and on tile objects (`TileAnimation`, `TileInfo::animation`, `TileFrame`), in step on the game clock.
+- `examples/animation`: Kenney's alien from a trimmed Aseprite sheet with a blink and a landing frame, a state machine in `alien.anim.ron`, footstep dust from a prefab emitter, squash and stretch, a hit flash and blink, spinning and bobbing coins with sparkles and pickup bursts, a waving flag, a camera that follows, shakes and zooms, and a fade into a particle gallery with a 10,000-particle stream. `--demo` lets a bot play it; a test runs the same bot without a window.
+- CI: `animation --demo`.
+
+### Changed
+
+- `DefaultPlugins` adds `AnimPlugin` (field `anim`); the prelude includes the animation items and `TileAnimation`.
+- `Assets` versions are unique across every collection in the process, so a renderer shared by two worlds (the golden tests, a future editor's play mode) never takes one image for another. This fixed reference-image tests that could fail when run in parallel.
+- `examples/tiled_map` plays its enemies' frames with `SpriteAnimation` clips built in code from the character atlas; its `Frames` component is gone.
+- New dependency: `serde_json` 1.0.154 (Aseprite sheets).
+
 ## Phase 5 — Collision and physics
 
 ### Added

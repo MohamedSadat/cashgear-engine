@@ -42,6 +42,7 @@ pub use cg_tiled as tiled;
 pub use cg_ui as ui;
 pub use cg_world as world;
 
+use cg_anim::AnimPlugin;
 use cg_assets::AssetPlugin;
 use cg_core::{App, FrameLimitPlugin, Plugin};
 use cg_physics::PhysicsPlugin;
@@ -56,7 +57,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The standard set of plugins for a game: logging, the `--frames N` flag, input, the
 /// world (transforms, interpolation, prefabs), assets, the window with its runner, the
-/// renderer, Tiled maps and physics.
+/// renderer, Tiled maps, physics, and animation and effects.
 ///
 /// Launch flags work on desktop and, as a query string (`?frames=60&backend=gl`), on the
 /// web: `--frames N` exits after N frames, `--no-vsync` and `--backend <list>` configure
@@ -89,6 +90,8 @@ pub struct DefaultPlugins {
     pub assets: AssetPlugin,
     /// Physics settings. `--physics-debug` overrides them.
     pub physics: PhysicsPlugin,
+    /// Animation settings: the particle budget.
+    pub anim: AnimPlugin,
 }
 
 impl Plugin for DefaultPlugins {
@@ -106,15 +109,17 @@ impl Plugin for DefaultPlugins {
             })
             .add_plugins(self.render.clone().with_args(&args))
             .add_plugins(TiledPlugin)
-            .add_plugins(self.physics.clone().with_args(&args));
+            .add_plugins(self.physics.clone().with_args(&args))
+            .add_plugins(self.anim.clone());
     }
 }
 
 /// Common imports for game code: the app and plugins, schedules, time, the ECS, `glam`
 /// vectors, logging macros, the window, input, transforms, states, prefabs, assets,
-/// rendering, Tiled maps and physics.
+/// rendering, Tiled maps, physics, and animation and effects.
 pub mod prelude {
     pub use crate::DefaultPlugins;
+    pub use cg_anim::prelude::*;
     pub use cg_assets::prelude::*;
     pub use cg_core::prelude::*;
     pub use cg_physics::prelude::*;

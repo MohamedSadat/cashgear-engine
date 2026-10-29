@@ -460,3 +460,44 @@ fn hierarchy_matches_hand_placed_sprites() {
     let hand_image = render(size, &view, &images, &by_hand, &shapes).unwrap();
     assert_eq!(ecs_image.data(), hand_image.data());
 }
+
+/// `Sprite::flash` mixes towards its colour by its alpha, in linear light, and keeps the
+/// sprite's transparency.
+#[test]
+fn flash_mixes_towards_its_colour() {
+    let mut images = Assets::default();
+    // Blue on the left half, transparent on the right.
+    let half = images.add(Image::from_fn(8, 8, |x, _| {
+        if x < 4 {
+            [0, 0, 255, 255]
+        } else {
+            [0, 0, 0, 0]
+        }
+    }));
+    let mut cam = camera(ScalingMode::WindowSize);
+    cam.camera.clear_color = Color::BLACK;
+    let sprites = [
+        Draw::of(&half)
+            .at(-8.0, 0.0)
+            .sprite(|s| s.flash = Color::WHITE),
+        Draw::of(&half)
+            .at(8.0, 0.0)
+            .sprite(|s| s.flash = Color::RED.with_alpha(0.5)),
+    ];
+    let Some(image) = render(
+        uvec2(32, 16),
+        &cam,
+        &images,
+        &sprites,
+        &DebugShapes::default(),
+    ) else {
+        return;
+    };
+    let close = |a: [u8; 4], b: [u8; 4]| a.iter().zip(b).all(|(a, b)| a.abs_diff(b) <= 1);
+    let pixel = |x| image.pixel(x, 8).unwrap();
+    assert!(close(pixel(5), [255, 255, 255, 255]), "{:?}", pixel(5));
+    assert!(close(pixel(10), [0, 0, 0, 255]), "{:?}", pixel(10));
+    // Half way from linear blue to linear red is sRGB (188, 0, 188).
+    assert!(close(pixel(21), [188, 0, 188, 255]), "{:?}", pixel(21));
+    assert!(close(pixel(26), [0, 0, 0, 255]), "{:?}", pixel(26));
+}

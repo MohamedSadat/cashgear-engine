@@ -61,6 +61,8 @@ jobs:
           run cargo run -p tiled_map -- --frames 360 --demo
           # No frame limit: the bot exits by itself, with an error if it fails the course.
           run cargo run -p collision -- --demo --physics-debug
+          # The same for the animation bot, which also visits the particle gallery.
+          run cargo run -p animation -- --demo
       - name: committed atlases are up to date
         run: >-
           cargo run -p cg_pack -- atlas examples/tiled_map/art/characters

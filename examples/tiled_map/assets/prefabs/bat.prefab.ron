@@ -1,8 +1,7 @@
-// A bat that hovers in place, flapping through three atlas frames.
+// A bat that hovers in place, flapping through the `bat` clip of the character sheet.
 (
     components: {
-        "AtlasSprite": (atlas: "atlases/characters.atlas.ron", region: "bat_0"),
-        "Frames": (regions: ["bat_0", "bat_1", "bat_2", "bat_1"], fps: 8),
+        "SpriteAnimation": (sheet: "generated/characters.sheet", clip: "bat"),
         "Hover": (height: 6, speed: 2),
     },
 )

@@ -3,7 +3,7 @@
 
 use crate::map::{
     ImageLayer, LayerKind, LayerTile, MapLayer, MapObject, ObjectShape, Properties, PropertyValue,
-    TileInfo, TileLayer, TiledMap, Tileset,
+    TileFrame, TileInfo, TileLayer, TiledMap, Tileset,
 };
 use cg_assets::{AssetLoader, BoxError, BoxedFuture, LoadContext, path};
 use cg_core::glam::{IVec2, UVec2, Vec2, vec2};
@@ -197,11 +197,24 @@ impl Converter<'_> {
         };
         let tiles = tileset
             .tiles()
-            .filter(|(_, tile)| !tile.user_type.is_empty() || !tile.properties.is_empty())
+            .filter(|(_, tile)| {
+                !tile.user_type.is_empty()
+                    || !tile.properties.is_empty()
+                    || tile.animation.is_some()
+            })
             .map(|(id, tile)| {
                 let info = TileInfo {
                     class: tile.user_type.clone(),
                     properties: self.properties(&tile.properties, &tileset_path),
+                    animation: tile
+                        .animation
+                        .iter()
+                        .flatten()
+                        .map(|frame| TileFrame {
+                            tile: frame.tile_id,
+                            duration: frame.duration as f32 / 1000.0,
+                        })
+                        .collect(),
                 };
                 (id, info)
             })

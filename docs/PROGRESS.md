@@ -12,8 +12,8 @@ This file tracks phase status, the decisions made at the start of each phase, kn
 | 3 | ECS and scenes | Done | `phase-3` |
 | 4 | Assets and tilemaps | Done | `phase-4` |
 | 5 | Collision and physics | Done | `phase-5` |
-| 6 | Animation and effects | Next | |
-| 7 | Audio | Not started | |
+| 6 | Animation and effects | Done | `phase-6` |
+| 7 | Audio | Next | |
 | 8 | Text and UI | Not started | |
 | 9 | Platformer sample game | Not started | |
 | 10 | Web build | Not started | |
@@ -324,6 +324,77 @@ Other choices made during the phase:
 - Live editing: with the example running, open `examples/collision/assets/maps/course.tmx` in Tiled, change the ground and save; the log says `rebuilt collision for maps/course.tmx`.
 - Web: `cd examples/collision && trunk serve --port 8084`, then open <http://127.0.0.1:8084> (and `?physics-debug`, `?demo`).
 
+## Phase 6 — Animation and effects
+
+### Decisions
+
+| Question | Answer |
+| --- | --- |
+| Clip format | Aseprite's JSON sheet export is the standard: both the "Hash" and "Array" layouts, trimmed or not, tags as clips with their direction and repeat count, and events in a tag's user data (`0:footstep, 1:footstep`). Clips can also be built in code from the regions of a `cg_pack` atlas, which replaced `tiled_map`'s `Frames` stand-in. |
+| Character art | Kenney's Pixel Platformer green alien, the character Phase 9 will most likely use. It has two poses, so the sheet adds a blink and a squashed landing frame edited from them, and tweens do the rest: squash and stretch, breathing, the hit flash and blink. Aseprite is not installed here, so a script wrote the sheet in Aseprite 1.3's export format (trimmed, Hash layout). |
+| Particle budget | At most 16,384 live particles across all emitters (`AnimPlugin::particle_budget`), plus a cap per emitter (1,024 by default). Particles beyond the budget are not emitted, and the first time that happens is logged. The target was 10,000 live at 60 fps in a debug build on desktop and web. |
+| Shader effects | A hit flash now (`Sprite::flash`); outlines went to the backlog, because they sample neighbouring texels and Kenney's sheets have no padding. |
+
+Chosen without asking (said at the end of the questions):
+
+- **State machine files.** `AnimationGraph` is a serde struct, loaded from `.anim.ron` files (hot-reloaded) or built in code.
+- **Tiled tile animations.** Included, since Phase 5's notes put them in this phase: the example's goal flag waves.
+
+Other choices made during the phase:
+
+- **Schedule.** Animation runs in `FixedPostUpdate` after `PhysicsSystems::Detect`, in `AnimSystems::Animate`: tweens of interpolated transforms, then animators, then clips and their events. Camera following runs next, in `AnimSystems::Camera`. Frames and events therefore depend only on the number of fixed steps, never the frame rate. Game code sets animator parameters in `FixedUpdate` and reads events there in the next step, as with physics contacts. Particles, the other tweens, shake decay and fades run every frame in `Update` (`AnimSystems::Effects`). `cg_anim` depends on `cg_physics` only for that ordering.
+- **Clips.** A ping-pong play goes there and back without repeating the ends (0 1 2 1), and a finished ping-pong clip holds the frame it started on. A tag without a repeat count (or 0) loops for ever. Events fire each time their frame starts showing, including frames passed over in one long step. A sheet without tags gets one `default` clip. Tag user data that is not `frame:name` is ignored with a warning. A new or switched clip shows its first frame in `PostUpdate` of the same frame, so even a paused game shows it.
+- **Pivots.** `SpriteAnimation::pivot` is a fraction of the untrimmed frame. The player sets `Sprite::pivot` for every frame so trimmed frames stay put. With `flip_x`, the frame mirrors around that point, so a character turns round on the spot. A plain `Sprite` mirrors inside its quad instead. The player sets the texture, source and pivot and leaves size, colour and flips to the game.
+- **Animators.** Transitions are tried in file order, up to eight a step, so `land` → `idle` → `run` can happen in one step. An empty `from` means any other state. Triggers last one step and are used up by the transition they fire. A state without a `clip` plays the clip named after it; `speed_param` scales its speed by the parameter's absolute value. `force` jumps to a state (respawns). A reloaded graph keeps the current state if it still exists.
+- **Tweens.** Properties are an enum (translation, scale, rotation, colour, flash, zoom), not generic lenses, so there are no trait objects and tweens stay easy to describe. Transform tweens on `Interpolated` entities run in fixed steps, so interpolation smooths them. All other tweens run every frame, on scaled time either way. `Tweens::start` replaces a running tween of the same property; `add` runs alongside. A tween's time past its end is not carried into its `then` follow-up, an error of at most one frame. Unchanged values are not written, so change detection stays quiet.
+- **Particles.** The settings use degrees because they are mostly written by hand in prefabs. Particles emitted during a frame spread along the emitter's path and are aged by the part of the frame since they left, so a moving emitter leaves an even trail. Each emitter has its own PCG-32 stream (`with_seed` makes one repeatable). Particles go to the sprite queue as one `QueuedSprite` each, culled per emitter by bounds that use the real texel size.
+- **Camera.** `CameraFollow` moves the camera's transform in fixed steps; give the camera `Interpolated`. Shake and the bounds act on `FrameView` in `Render`, between `RenderSystems::View` and `Queue`, so `MainCamera` and pointer picking ignore the shake. A zoom tween, which changes the view between fixed steps, never shows past the bounds; the example's watch caught exactly that before the view was clamped too. Shake is trauma squared times smooth value noise.
+- **Fades.** `ScreenFade` draws a sprite on layer `i32::MAX` over the visible rectangle (debug shapes stay on top) and runs on real time. `StateFade<S>` queues `StateChange`s and hands each to `NextState` once the screen is covered. It fades back in a frame later, after `OnEnter` has run.
+- **Flash.** `Sprite::flash` is a `Color` whose alpha is the amount. It travels as `Unorm8x4`, so an instance is now 60 bytes (was 56). The shader mixes towards it in linear light and keeps the alpha. A transparent flash leaves the output exactly as it was, so the six reference PNGs did not change; a new GPU test pins the mix. The batcher skips the colour conversion for sprites without a flash: converting every sprite's flash cost 0.45 ms a frame at 10,000 sprites, found by running bunnymark against a Phase 5 build. With the skip, release bunnymark is back at about 1.37 ms (730 fps) at 10,000 sprites, as before.
+- **Asset versions.** `Assets` versions now come from one counter for the whole process. The new GPU test exposed a test-only bug: every test's first image had the same id and version, so the shared offscreen renderer sometimes drew another test's texture. The fix also covers an editor's play mode later, which may share one renderer between worlds.
+- **Tile animations.** Tile layers swap the source rectangle of animated tiles as chunks are queued. Tile objects of animated tiles get a `TileAnimation` that sets their sprite in `PostUpdate`. Both run on `Time::elapsed`, all copies in step as in Tiled.
+- **Example art.** A scratch script made `images/alien.png` and `images/alien.json` from Kenney's characters: seven frames, trimmed, packed in a row with one texel of padding. Another made `maps/playground.tmx` from `collision`'s Kenney tiles and slope tiles. Neither script is in the repository.
+- **Versions.** serde_json 1.0.154.
+
+### Done
+
+- `cg_anim`: `SpriteSheet`, `SheetFrame`, `AnimationClip`, `ClipFrame`, `ClipEvent`, `Direction`; `AsepriteLoader` and `AsepriteExport`; `SpriteAnimation` (with `FEET`), `AnimationEvent`, `AnimationFinished`; `AnimationGraph`, `AnimationState`, `Transition`, `Condition`, `Test`, `Animator`, `AnimationStateChanged`, `AnimationGraphLoader`; `Tween`, `TweenValue`, `TweenProperty`, `TweenData`, `Tweens`, `TweenFinished`, `TweenCommandsExt`, `Ease`; `ParticleEmitter`, `ParticleSettings`, `EmitShape`, `Particle`, `ParticleBudget`; `CameraFollow`, `CameraShake`; `ScreenFade`, `StateFade`, `AppFadeExt`; `AnimPlugin`, `AnimSystems` and a prelude.
+- `cg_render`: `Sprite::flash` (and in `SpriteData` and `QueuedSprite`).
+- `cg_tiled`: `TileAnimation`, `TileFrame`, `TileInfo::animation`.
+- `cg_assets`: versions unique across collections.
+- `cashgear_engine`: `DefaultPlugins` adds `AnimPlugin` (field `anim`); the prelude includes `cg_anim`'s.
+- `examples/animation` (new, with a trunk page on port 8085); `tiled_map`'s enemies ported to clips.
+- 308 tests (61 more than Phase 5): easing curves, the random stream and noise, clip directions, pivots of trimmed and flipped frames, Aseprite exports in both layouts with tags, repeats, events and errors, playback and events in an app, animator transitions with triggers, chains and forcing, tween clocks, chains and messages, particle rates, bursts, the budget and one-shot despawns, follow with dead zone and bounds, shake, state fades, tile animations in layers and objects, the flash on the GPU, and the example's bot playing the whole demo. The reference PNGs are unchanged.
+- CI: `animation --demo`.
+
+### Verified
+
+- All tests pass, the reference images too, on Vulkan (GTX 1650) and on WARP. fmt, clippy (desktop and wasm) and rustdoc with warnings denied are clean.
+- Desktop (Windows, GTX 1650, Vulkan), `animation --demo`: 60 fps with vsync. The bot reaches the goal in about 10.5 s of game time with 14 of 19 coins, 58 footsteps, 10 landings (the cliff at the 480 cap) and one hit. All six states were seen, peak trauma was 0.6, and the camera never showed outside the level. The gallery held about 10,900 particles at 60 fps in 6 draw calls. Uncapped (`--no-vsync`) with those particles: 402 fps in a dev build, 521 in release. The other five examples still run as CI runs them, without warnings. Release bunnymark at 10,000 sprites: about 730 fps (1.37 ms), level with a Phase 5 build run back to back.
+- Web (`trunk serve`, the app's browser pane, debug wasm, WebGPU), checked by screenshot at an exact 2×:
+  - the level fading in, with the alien, spinning coins and the parallax hills;
+  - the F1 drawing of colliders, the dead zone and the coin sensors;
+  - the bot at the goal, and the fade on the way to the gallery;
+  - the gallery (snow, fountain, fire and the stream) holding about 10,860 particles in 8 draw calls.
+- Not checked by me:
+  - The web frame rate. The pane was hidden, so the page ran as a throttled background tab at 4–5 fps.
+  - WebGL2.
+  - The desktop window by screenshot.
+  - Play by keyboard, gamepad or touch.
+  - The flag waving and the hit flash by eye. Tests cover both.
+
+### Manual checks for the user
+
+- Desktop: `cargo run -p animation`.
+  - Run with A/D or the arrows and jump with Space. The alien should blink and breathe while idle, kick up dust at every step, stretch on take-off and squash on landing (more after the cliff).
+  - Touch the spikes: a white flash, a blink, a knock back and a shake.
+  - Coins spin, bob and sparkle, and pop into a burst when taken. The flag at the goal waves.
+  - Z zooms in and out smoothly, never showing past the level's edges. P fades into the particle gallery and back. F1 shows the colliders, the camera's dead zone (pink) and the bounds (green).
+- `cargo run -p animation -- --demo` watches the bot. Add `--no-vsync` to see the frame rate in the gallery.
+- Live editing: with the example running, change a transition in `examples/animation/assets/anims/alien.anim.ron` (for example the run speed) and save; the alien changes at once. Tag durations in `images/alien.json` reload too.
+- `cargo run -p tiled_map`: the enemies walk and flap as before, now through clips.
+- Web: `cd examples/animation && trunk serve --port 8085`, then open <http://127.0.0.1:8085> (and `?demo`, `?backend=gl`). With the tab in front, the gallery (P) should hold 60 fps.
+
 ## Known issues
 
 - On the web, `AppExit` stops the loop but leaves the page; there is nowhere to exit to.
@@ -335,7 +406,7 @@ Other choices made during the phase:
 - On desktop, files are read and decoded on the main thread inside the asset update, so a large asset makes that frame long. A worker thread for desktop loads can come with the Phase 14 performance pass.
 - An example's executable run directly (not through `cargo run`) finds its assets only if they are next to it or `CG_ASSET_ROOT` points at them.
 - Hot-reloading a map respawns its objects, so they lose their state; hot-reloading a prefab changes only entities spawned afterwards.
-- `cg_tiled` supports orthogonal maps with single-image tilesets. Image-collection tilesets draw nothing (with a warning); tile animations, isometric and hexagonal maps, and text objects (spawned as plain rectangles) are not supported yet.
+- `cg_tiled` supports orthogonal maps with single-image tilesets. Image-collection tilesets draw nothing (with a warning); isometric and hexagonal maps, and text objects (spawned as plain rectangles) are not supported yet.
 - Tilemaps are drawn at their entity's `GlobalTransform2D` without interpolation, so a map moved in fixed steps would step on fast displays. Maps normally stay put.
 - Tile chunks are cached as queued sprites on the CPU and copied into the sprite queue each frame, not kept as GPU buffers. At the example's size that is about 320 tiles a frame; revisit if a level gets much larger.
 - Browsers hide the adapter name behind WebGPU, so `RenderStats::adapter()` reads "an unnamed GPU" there.
@@ -348,18 +419,24 @@ Other choices made during the phase:
 - Queries (`SpatialQuery`) see colliders where they were at the end of the latest physics step, not changes made since.
 - Hot-reloading a map rebuilds its collision and respawns its objects; in the `collision` example that restarts the run.
 
+- Clips, animators and fixed-step tweens run after the physics in `FixedPostUpdate`, so parameters set in `FixedUpdate` take effect in the same step, but events reach `FixedUpdate` one step later.
+- The engine's animation systems run in every game state. A game paused through its state stack (not `Time::set_time_scale(0.0)`) keeps animating sprites, moving particles and decaying shake underneath, as the example's gallery shows.
+- A tween's time past its end is not carried into its `then` follow-up (at most one frame of drift per link). Rotations tween numerically, not the short way round.
+- Flipping an animated sprite mirrors it around `SpriteAnimation::pivot`, unlike a plain sprite, which mirrors inside its quad.
+- A tile object of an animated Tiled tile that also gets a `SpriteAnimation` (from a prefab, say) has two things setting its sprite; remove its `TileAnimation`.
+- Particles are simulated on the CPU and queued as one sprite each. With about 11,000 alive a dev build still ran at 400 fps on the test machine, but a much larger budget would want GPU instancing of its own.
+- `CameraFollow` assumes the camera has no parent. Shake and bounds apply to the first active camera with them.
+- The screen fade covers the camera's view; with letterbox or pixel-perfect scaling, the bars stay black whatever the fade colour.
+- `Camera2D::zoom` is not interpolated, so a zoom changed in fixed steps would step on fast displays; zoom tweens therefore run every frame.
+- The Aseprite loader reads one image per sheet and ignores slices, layers and cel user data.
+
 ## Notes for later phases
 
 - **Any phase:** `trunk` only watches the example folder, so touch the example after editing engine crates while `trunk serve` runs.
-- **Phase 6:** the animation state machine can read `KinematicContacts` (`on_ground`, `just_landed`, `on_slope`, `on_wall`) and `KinematicBody::velocity` for its parameters; landing dust can spawn on `just_landed`. Physics runs in `FixedPostUpdate`, so read contacts in `FixedUpdate` (or `Update` for visuals).
-- **Phase 6:** `examples/collision`'s box and its `Intent`/bot split are a starting point for the animated character; Kenney's character tiles are in `examples/tiled_map/assets/images/characters.png`.
 - **Phase 9:** build the player controller on `KinematicBody` (coyote time from `just_left_ground`, jump buffer, variable jump as in `examples/collision`). Enemies can be kinematic bodies on their own `CollisionLayers`; stomps come from `CollisionStarted` plus comparing velocities or positions. Moving platforms need carrying (backlog). Tag tiles in the platformer's tileset with the same `solid`/`one_way`/`slope_left`/`slope_right`/`hazard` properties and copy `slopes.png`/`slopes.tsx` from `examples/collision`.
 - **Phase 12:** an `on_collision` Lua hook can be fed from `CollisionStarted`/`CollisionEnded`.
 - **Phase 13:** the editor can draw colliders through `PhysicsDebug` and pick entities with `SpatialQuery::overlap_point`.
-- **Phase 6:** camera follow, shake and zoom tweens should move the camera entity in `FixedUpdate` with `Interpolated`, as `ecs_sprites` does.
 - **Phase 13:** add `bevy_reflect` derives for the inspector; keep serde for prefab files. `Prefab::to_ron` already writes prefabs, but capturing a live entity back into a prefab still needs a `to_data` direction on `PrefabComponent`.
-- **Phase 6:** Aseprite JSON can be an `AssetLoader` producing an atlas-like asset (frames are regions); `tiled_map`'s `Frames` component (cycling `AtlasSprite::region`) is a stand-in until real clips. Tiled tile animations belong there too.
-- **Phase 6:** particles can reuse the sprite batcher (white texture, tint). Flash-on-hit and outline effects need a second sprite pipeline or a shader parameter in the instance data.
 - **Phase 8:** egui will need its own pass after the debug shapes. `Painter::render` is the place to add it.
 - **Phase 10:** measure a release wasm build (`trunk build --release`, `wasm-opt`). The debug wasm is about 10 MB.
 - **Phase 8:** on-screen buttons can press actions through a new `Binding` variant or by driving `ScreenRegion` touches.
@@ -367,6 +444,12 @@ Other choices made during the phase:
 - **Phase 9:** the Kenney Pixel Platformer sheets and license are in `examples/tiled_map/assets`; the scratch generator that built the level is not in the repository, so new levels are made in Tiled.
 - **Phase 11:** add `aarch64-linux-android` to `rust-toolchain.toml` targets and a CI job. Fill in the Android branch of `cg_platform::io` (APK assets through `android-activity`'s asset manager); file watching stays desktop-only.
 - **Phase 12:** `cg_script` will not build for wasm; keep it out of `check-wasm` or behind the `script` feature.
+
+- **Phase 7:** footstep and landing sounds can hang off `AnimationEvent`s (read them in `FixedUpdate`) and `just_landed`; camera shake moves only the drawn view (`FrameView`), so take the listener position from the camera's transform.
+- **Phase 8:** tweens know only transforms, sprites and camera zoom; UI widgets will need their own tween properties (or a generic lens). `ScreenFade` is a sprite on layer `i32::MAX`, so UI drawn in its own pass after the sprites shows over the fade; decide whether menus fade with the game.
+- **Phase 9:** reuse `examples/animation`'s controller, `alien.anim.ron`, dust prefab and hit flash for the player, `StateFade` for menu and level changes, and Tiled tile animations for coins, water and flags in the platformer's tileset. Enemies can each have an `Animator`.
+- **Phase 10:** measure the particle gallery in a release wasm build with the tab in front, on WebGPU and WebGL2.
+- **Phase 13:** an animation preview (clips of a sheet, a graph's states) would suit the editor; clip events and particle settings are plain data already.
 
 ## Backlog
 
@@ -376,9 +459,14 @@ Features that came up but don't serve the platformer or a listed example go here
 - A z or y-sort key within a layer.
 - Multi-threaded system execution on desktop, if profiling ever calls for it. At 10,000 entities the ECS work is about 0.6 ms a frame single-threaded.
 - Packing atlases at runtime (Phase 4 packs them with `cg_pack`), and per-load loader settings (an image's filter, say).
-- Image-collection tilesets, tile animations, and isometric or hexagonal maps in `cg_tiled`.
+- Image-collection tilesets, and isometric or hexagonal maps in `cg_tiled`.
 - Asset bundling in `cg_pack` (the plan's other `cg_pack` job) is Phase 10's.
 - `rapier2d` behind a feature, for dynamic rigid bodies (tumbling crates, ragdolls).
 - Moving platforms that carry bodies, one-way entity colliders, and bodies pushed by moving colliders.
 - Partial-cell tile shapes from Tiled's tile collision editor (low spikes, half blocks), and ceiling slopes.
 - Rotated (oriented) boxes and polygon colliders.
+- Outlines as a sprite effect (sampling neighbouring texels; sheets need padding).
+- Generic tween lenses for any component; interpolated camera zoom.
+- GPU particles, or instanced particle buffers, if the CPU particles ever become the bottleneck.
+- Aseprite slices (per-frame pivots and hitboxes) and multi-layer exports.
+- Camera look-ahead in the direction of travel.

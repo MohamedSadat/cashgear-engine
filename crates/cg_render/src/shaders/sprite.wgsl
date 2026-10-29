@@ -21,12 +21,16 @@ struct Instance {
     @location(3) uv: vec4<f32>,
     // sRGB tint, straight alpha.
     @location(4) color: vec4<f32>,
+    // sRGB flash colour; alpha is how far to mix towards it.
+    @location(5) flash: vec4<f32>,
 };
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
+    // Linear flash colour and amount.
+    @location(2) flash: vec4<f32>,
 };
 
 fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
@@ -59,10 +63,13 @@ fn vs_main(@builtin(vertex_index) index: u32, instance: Instance) -> VertexOutpu
     out.position = clip;
     out.uv = mix(instance.uv.xy, instance.uv.zw, corner);
     out.color = vec4<f32>(srgb_to_linear(instance.color.rgb), instance.color.a);
+    out.flash = vec4<f32>(srgb_to_linear(instance.flash.rgb), instance.flash.a);
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return textureSample(sprite_texture, sprite_sampler, in.uv) * in.color;
+    let color = textureSample(sprite_texture, sprite_sampler, in.uv) * in.color;
+    // A flash amount of 0 leaves the colour exactly as it is.
+    return vec4<f32>(mix(color.rgb, in.flash.rgb, in.flash.a), color.a);
 }

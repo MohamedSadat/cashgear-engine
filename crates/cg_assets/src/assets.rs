@@ -5,7 +5,16 @@ use crate::{Asset, AssetId, Handle};
 use bevy_ecs::message::Message;
 use bevy_ecs::resource::Resource;
 use core::fmt;
+use core::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+
+/// The latest revision handed out by any [`Assets`] collection.
+static REVISION: AtomicU64 = AtomicU64::new(0);
+
+/// A revision number never handed out before in this process.
+fn next_revision() -> u64 {
+    REVISION.fetch_add(1, Ordering::Relaxed) + 1
+}
 
 /// Something that happened to an asset, sent as a message at the end of the asset
 /// systems in [`First`](cg_core::First).
@@ -89,7 +98,9 @@ struct Slot<T> {
 ///
 /// Each asset has a [`version`](Self::version) that changes whenever it is replaced or
 /// borrowed mutably, so systems can notice changes by comparing versions instead of
-/// reading [`AssetEvent`]s.
+/// reading [`AssetEvent`]s. Versions are unique across every collection in the process,
+/// so something that caches by id and version, such as a renderer shared by two worlds,
+/// never takes one collection's asset for another's.
 #[derive(Resource)]
 pub struct Assets<T: Asset> {
     slots: Vec<Slot<T>>,
@@ -161,7 +172,7 @@ impl<T: Asset> Assets<T> {
                 version: 0,
             });
         }
-        self.revision += 1;
+        self.revision = next_revision();
         let revision = self.revision;
         let slot = &mut self.slots[index];
         let replaced = slot.generation == id.generation() && slot.value.is_some();
@@ -199,7 +210,7 @@ impl<T: Asset> Assets<T> {
     pub fn get_mut(&mut self, id: impl Into<AssetId<T>>) -> Option<&mut T> {
         let id = id.into();
         self.slot(id)?;
-        self.revision += 1;
+        self.revision = next_revision();
         self.events.push(AssetEvent::Modified { id });
         let slot = &mut self.slots[id.index() as usize];
         slot.version = self.revision;
@@ -215,7 +226,7 @@ impl<T: Asset> Assets<T> {
     pub fn remove(&mut self, id: impl Into<AssetId<T>>) -> Option<T> {
         let id = id.into();
         self.slot(id)?;
-        self.revision += 1;
+        self.revision = next_revision();
         self.len -= 1;
         self.events.push(AssetEvent::Removed { id });
         self.slots[id.index() as usize].value.take()

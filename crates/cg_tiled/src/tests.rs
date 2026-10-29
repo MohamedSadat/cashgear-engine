@@ -383,6 +383,83 @@ fn a_missing_tileset_fails_the_map_with_its_path() {
     );
 }
 
+/// Two animated tiles: tile 2 shows itself for 0.1 s, then tile 3 for 0.3 s; tile 3
+/// shows itself for 0.2 s, then tile 2 for 0.2 s.
+const ANIMATED_TILESET: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<tileset version="1.10" tiledversion="1.10.2" name="tiles" tilewidth="8" tileheight="8" tilecount="4" columns="2">
+ <image source="../images/tiles.png" width="16" height="16"/>
+ <tile id="2">
+  <animation>
+   <frame tileid="2" duration="100"/>
+   <frame tileid="3" duration="300"/>
+  </animation>
+ </tile>
+ <tile id="3">
+  <animation>
+   <frame tileid="3" duration="200"/>
+   <frame tileid="2" duration="200"/>
+  </animation>
+ </tile>
+</tileset>
+"#;
+
+#[test]
+fn animated_tiles_play_in_layers_and_on_tile_objects() {
+    let folder = Folder::new("animated");
+    folder.write("tilesets/tiles.tsx", ANIMATED_TILESET);
+    let mut app = app(&folder);
+    app.add_systems(PostUpdate, animation::animate_tile_objects);
+    let handle = load(&mut app);
+    let maps = app.world().resource::<Assets<TiledMap>>();
+    let tileset = &maps.get(&handle).unwrap().tilesets[0];
+    assert_eq!(
+        tileset.tiles[&2].animation,
+        [
+            TileFrame {
+                tile: 2,
+                duration: 0.1
+            },
+            TileFrame {
+                tile: 3,
+                duration: 0.3
+            }
+        ]
+    );
+    let (two, three) = (tileset.tile_rect(2), tileset.tile_rect(3));
+    app.world_mut().spawn(Tilemap::new(handle));
+    app.update(Duration::ZERO);
+
+    // The hills layer holds one tile 2; the tile object (gid 4) is tile 3.
+    let step = |app: &mut App, millis: u64| -> (Vec<Rect>, Option<Rect>) {
+        app.world_mut().resource_mut::<Sprites>().clear();
+        app.update(Duration::from_millis(millis));
+        let layer = app
+            .world()
+            .resource::<Sprites>()
+            .queued()
+            .iter()
+            .filter_map(|s| s.source)
+            .filter(|r| *r == two || *r == three)
+            .collect();
+        let world = app.world_mut();
+        let mut objects = world.query_filtered::<&Sprite, With<TileAnimation>>();
+        let object = objects.single(world).ok().and_then(|s| s.source);
+        (layer, object)
+    };
+    assert_eq!(step(&mut app, 16), (vec![two], Some(three)), "first frames");
+    assert_eq!(
+        step(&mut app, 100),
+        (vec![three], Some(three)),
+        "the layer tile moves on"
+    );
+    assert_eq!(
+        step(&mut app, 100),
+        (vec![three], Some(two)),
+        "then the object"
+    );
+    assert_eq!(step(&mut app, 200), (vec![two], Some(three)), "both loop");
+}
+
 #[test]
 fn tile_objects_without_an_image_still_spawn() {
     // A map whose only tileset is an image collection: tiles draw nothing, objects spawn.

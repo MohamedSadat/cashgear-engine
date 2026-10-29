@@ -1,12 +1,28 @@
 [package]
 name = "cg_anim"
-description = "CashGear Engine animation: sprite clips, state machines, tweens and particles."
+description = "CashGear Engine animation: sprite clips, state machines, tweens, particles and camera effects."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
+
+[dependencies]
+# Direct dependency so bevy's derive macros (`Component`, `Message`) can find `bevy_ecs`.
+bevy_ecs.workspace = true
+cg_assets.workspace = true
+cg_core.workspace = true
+# Only for ordering: animation and the camera run after the physics step.
+cg_physics.workspace = true
+cg_platform.workspace = true
+cg_render.workspace = true
+cg_world.workspace = true
+log.workspace = true
+ron.workspace = true
+serde.workspace = true
+# Aseprite sheets are JSON.
+serde_json.workspace = true
 
 [lints]
 workspace = true

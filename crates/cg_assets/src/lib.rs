@@ -13,7 +13,7 @@
 //! Files live in the game's `assets` folder and are named by their path inside it, with
 //! `/` separators. On desktop they are read from disk, on the web fetched from the page's
 //! server, and on Android (from Phase 11) read from the APK; see
-//! [`AssetIo`](cg_platform::io::AssetIo) for how the folder is found.
+//! [`AssetIo`] for how the folder is found.
 //!
 //! ```
 //! use cg_assets::prelude::*;

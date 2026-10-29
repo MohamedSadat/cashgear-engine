@@ -19,9 +19,9 @@
 //!   (parallax); decorations, some flipped in Tiled, sit on the ground layer.
 //! - **Objects**: coins are tile objects whose `Coin` class spawns the coin prefab, which
 //!   makes them bob. Enemies are tile objects of the `Slime`, `Alien`, `Pink` and `Bat`
-//!   classes; their prefabs draw them from `atlases/characters.atlas.ron`, packed by
-//!   `cg_pack` from `art/characters`, and animate them by region name. A `Patrol` class
-//!   property in Tiled tunes each walker's speed and distance.
+//!   classes; their prefabs play clips of a sprite sheet built in code from the regions of
+//!   `atlases/characters.atlas.ron` (packed by `cg_pack` from `art/characters`). A
+//!   `Patrol` class property in Tiled tunes each walker's speed and distance.
 //! - **Tile properties**: the tileset marks `solid`, `one_way` and `hazard` tiles for
 //!   Phase 5's collision; the status line counts them.
 //!
@@ -40,6 +40,16 @@ use serde::{Deserialize, Serialize};
 
 const MAP: &str = "maps/level.tmx";
 const ATLAS: &str = "atlases/characters.atlas.ron";
+/// The path the character sheet is stored under once it is built from the atlas; the
+/// enemy prefabs name it.
+const SHEET: &str = "generated/characters.sheet";
+/// The character clips: atlas regions in order, and frames per second.
+const CLIPS: &[(&str, &[&str], f32)] = &[
+    ("alien", &["alien_0", "alien_1"], 5.0),
+    ("pink", &["pink_0", "pink_1"], 6.0),
+    ("slime", &["slime_0", "slime_1"], 3.0),
+    ("bat", &["bat_0", "bat_1", "bat_2", "bat_1"], 8.0),
+];
 /// Camera speed in world units per second.
 const SCROLL_SPEED: f32 = 160.0;
 /// The sky colour of the background tiles, so the view above the hills matches.
@@ -99,15 +109,6 @@ struct Hover {
     base: Option<Vec2>,
 }
 
-/// Cycles the entity's `AtlasSprite` through named atlas regions.
-#[derive(Component, Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
-struct Frames {
-    regions: Vec<String>,
-    /// Frames per second.
-    fps: f32,
-}
-
 /// Marks coins, for the status line.
 #[derive(Component, Debug, Clone, Default, Serialize, Deserialize)]
 struct Coin;
@@ -116,6 +117,8 @@ struct Coin;
 #[derive(Resource)]
 struct Level {
     map: Handle<TiledMap>,
+    /// The character sheet, kept loaded once built.
+    characters: Handle<SpriteSheet>,
 }
 
 /// Whether the camera scrolls by itself, and which way.
@@ -162,7 +165,6 @@ impl Plugin for Game {
             .register_component::<Bob>("Bob")
             .register_component::<Patrol>("Patrol")
             .register_component::<Hover>("Hover")
-            .register_component::<Frames>("Frames")
             .register_component::<Coin>("Coin")
             // Object classes in the map name these prefabs.
             .load_prefab("Coin", "prefabs/coin.prefab.ron")
@@ -173,6 +175,7 @@ impl Plugin for Game {
             .init_state(Loading)
             .add_loading_state(Loading, Playing)
             .add_systems(Startup, setup)
+            .add_systems(PreUpdate, build_character_sheet)
             .add_systems(Update, draw_loading_bar.run_if(in_state(Loading)))
             .add_systems(OnEnter(Playing), enter_playing)
             .add_systems(
@@ -181,7 +184,7 @@ impl Plugin for Game {
             )
             .add_systems(
                 Update,
-                (playing_input, animate, describe_level, report).run_if(in_state(Playing)),
+                (playing_input, describe_level, report).run_if(in_state(Playing)),
             );
     }
 }
@@ -215,7 +218,10 @@ fn setup(mut commands: Commands, server: Res<AssetServer>, mut loading: ResMut<L
     let map = server.load::<TiledMap>(MAP);
     loading.add(&map);
     loading.add(server.load::<TextureAtlas>(ATLAS));
-    commands.insert_resource(Level { map });
+    commands.insert_resource(Level {
+        map,
+        characters: Handle::default(),
+    });
     commands.spawn((
         Name::new("camera"),
         Camera2D {
@@ -355,17 +361,37 @@ fn hover(time: Res<Time>, mut hoverers: Query<(&mut Transform2D, &mut Hover)>) {
     }
 }
 
-/// Steps each animated entity's atlas region, looked up by name.
-fn animate(time: Res<Time>, mut animated: Query<(&Frames, &mut AtlasSprite)>) {
-    let t = time.elapsed_secs() as f32;
-    for (frames, mut atlas_sprite) in &mut animated {
-        if frames.regions.is_empty() {
+/// Builds the character sheet from the atlas whenever the atlas loads or changes, and
+/// stores it under [`SHEET`] for the prefabs.
+fn build_character_sheet(
+    mut events: MessageReader<AssetEvent<TextureAtlas>>,
+    atlases: Res<Assets<TextureAtlas>>,
+    server: Res<AssetServer>,
+    level: Option<ResMut<Level>>,
+) {
+    let Some(mut level) = level else {
+        return;
+    };
+    for event in events.read() {
+        let (AssetEvent::Added { id } | AssetEvent::Modified { id }) = *event else {
+            continue;
+        };
+        if server.path(id.untyped()).as_deref() != Some(ATLAS) {
             continue;
         }
-        let index = (t * frames.fps) as usize % frames.regions.len();
-        if atlas_sprite.region != frames.regions[index] {
-            atlas_sprite.region = frames.regions[index].clone();
+        let Some(atlas) = atlases.get(id) else {
+            continue;
+        };
+        let mut sheet = SpriteSheet::from_atlas(atlas);
+        for &(name, frames, fps) in CLIPS {
+            match sheet.clip_from_frames(frames, fps) {
+                Ok(clip) => {
+                    sheet.add_clip(name, clip);
+                }
+                Err(err) => warn!("clip `{name}`: {err}"),
+            }
         }
+        level.characters = server.add(SHEET, sheet);
     }
 }
 
@@ -437,7 +463,7 @@ fn report(
     time: Res<Time>,
     stats: Res<RenderStats>,
     coins: Query<(), With<Coin>>,
-    enemies: Query<(), With<Frames>>,
+    enemies: Query<(), With<SpriteAnimation>>,
     camera: Single<&Transform2D, With<Camera2D>>,
     mut last: Local<f64>,
 ) {
@@ -472,6 +498,7 @@ mod tests {
         })
         .add_plugins(InputPlugin { gamepads: false })
         .add_plugins(TiledPlugin)
+        .add_plugins(AnimPlugin::default())
         .add_plugins(Game);
         // Desktop reads files at once: the first update loads everything and the state
         // moves on in the next; the map is built and its objects spawned after that.
@@ -494,10 +521,19 @@ mod tests {
         let objects = state.objects().len();
         let mut coins = world.query_filtered::<(), With<Coin>>();
         let mut walkers = world.query_filtered::<(), With<Patrol>>();
-        let mut animated = world.query::<&AtlasSprite>();
+        let mut animated = world.query::<(&SpriteAnimation, &Sprite)>();
         assert_eq!(objects, 53);
         assert_eq!(coins.iter(world).count(), 42);
         assert_eq!(walkers.iter(world).count(), 5);
         assert_eq!(animated.iter(world).count(), 8);
+        // The sheet was built from the atlas, and every enemy shows a frame of it.
+        let level = world.resource::<Level>();
+        let sheets = world.resource::<Assets<SpriteSheet>>();
+        let sheet = sheets.get(&level.characters).expect("the character sheet");
+        assert_eq!(sheet.clip("bat").unwrap().frames.len(), 4);
+        for (animation, sprite) in animated.iter(world) {
+            assert_eq!(animation.sheet, level.characters);
+            assert!(sprite.source.is_some(), "showing {}", animation.clip());
+        }
     }
 }

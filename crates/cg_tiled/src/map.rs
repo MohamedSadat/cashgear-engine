@@ -169,6 +169,18 @@ pub struct TileInfo {
     pub class: String,
     /// The tile's custom properties, such as `solid` or `one_way` for collision.
     pub properties: Properties,
+    /// The tile's animation from Tiled's tile animation editor: tiles of the same tileset
+    /// shown in turn. Empty for a still tile.
+    pub animation: Vec<TileFrame>,
+}
+
+/// One frame of a tile animation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TileFrame {
+    /// The local id of the tile shown.
+    pub tile: u32,
+    /// Seconds it shows.
+    pub duration: f32,
 }
 
 /// One drawable layer of a [`TiledMap`].

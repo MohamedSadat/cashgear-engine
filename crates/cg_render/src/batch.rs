@@ -8,7 +8,7 @@ use cg_core::glam::Vec2;
 use core::ops::Range;
 
 /// One sprite as the GPU sees it: an affine transform of the unit square, texture
-/// coordinates and a tint. Matches `Instance` in `sprite.wgsl`.
+/// coordinates, a tint and a flash colour. Matches `Instance` in `sprite.wgsl`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
 pub(crate) struct SpriteInstance {
@@ -22,6 +22,8 @@ pub(crate) struct SpriteInstance {
     pub(crate) uv: [f32; 4],
     /// sRGB tint with straight alpha.
     pub(crate) color: [f32; 4],
+    /// sRGB flash colour, eight bits a channel; alpha is how far to mix towards it.
+    pub(crate) flash: [u8; 4],
 }
 
 /// A run of instances drawn with one texture in one draw call.
@@ -112,6 +114,12 @@ fn instance(queued: &QueuedSprite, images: &Assets<Image>) -> Option<SpriteInsta
             top / texture_size.y,
         ],
         color: queued.color.to_array(),
+        // Almost every sprite has no flash; skip the conversion for those.
+        flash: if queued.flash.a > 0.0 {
+            queued.flash.to_rgba8()
+        } else {
+            [0; 4]
+        },
     })
 }
 

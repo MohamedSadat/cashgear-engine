@@ -1,16 +1,17 @@
 //! Drawing tilemaps: tile layers become cached chunks of queued sprites, culled and
 //! queued as a whole each frame; image layers are queued, repeated to fill the view.
 
+use crate::animation::TileAnimation;
 use crate::map::{LayerKind, LayerTile, MapLayer, TiledMap};
 use crate::spawn::TilemapState;
 use bevy_ecs::prelude::*;
 use cg_assets::{AssetId, Assets};
-use cg_core::Rect;
 use cg_core::glam::{Affine2, IVec2, Vec2, vec2};
+use cg_core::{Rect, Time};
 use cg_platform::Window;
 use cg_render::{Color, FrameView, Image, InheritedVisibility, QueuedSprite, RenderStats, Sprites};
 use cg_world::GlobalTransform2D;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Tiles per chunk side.
 pub(crate) const CHUNK_TILES: i32 = 16;
@@ -26,6 +27,8 @@ pub(crate) struct TileChunk {
     pub(crate) bounds: Rect,
     /// The tiles, with transforms relative to the map entity.
     pub(crate) sprites: Vec<QueuedSprite>,
+    /// The animated tiles among them, by index into `sprites`, in order.
+    pub(crate) animated: Vec<(usize, TileAnimation)>,
 }
 
 /// An image layer, ready to queue.
@@ -45,6 +48,8 @@ pub(crate) struct ImageDraw {
 pub(crate) fn build(map: &TiledMap, base: i32) -> (Vec<TileChunk>, Vec<ImageDraw>) {
     let mut chunks = Vec::new();
     let mut images = Vec::new();
+    // Each animated tile's frames, shared by all its copies.
+    let mut animations: HashMap<(usize, u32), Option<TileAnimation>> = HashMap::new();
     for (index, layer) in map.layers.iter().enumerate() {
         if !layer.visible {
             continue;
@@ -52,19 +57,36 @@ pub(crate) fn build(map: &TiledMap, base: i32) -> (Vec<TileChunk>, Vec<ImageDraw
         let draw_layer = base + index as i32;
         match &layer.kind {
             LayerKind::Tiles(tiles) => {
-                let mut by_chunk: BTreeMap<(i32, i32), Vec<QueuedSprite>> = BTreeMap::new();
+                let mut by_chunk: BTreeMap<(i32, i32), TileChunk> = BTreeMap::new();
                 for (cell, tile) in tiles.iter() {
                     let Some(sprite) = tile_sprite(map, layer, cell, tile, draw_layer) else {
                         continue;
                     };
                     let key = cell.div_euclid(IVec2::splat(CHUNK_TILES));
                     // Rows run top to bottom; keep that order within a chunk.
-                    by_chunk.entry((key.y, key.x)).or_default().push(sprite);
+                    let chunk = by_chunk.entry((key.y, key.x)).or_insert_with(|| TileChunk {
+                        parallax: layer.parallax,
+                        bounds: Rect::default(),
+                        sprites: Vec::new(),
+                        animated: Vec::new(),
+                    });
+                    let animation =
+                        animations
+                            .entry((tile.tileset, tile.id))
+                            .or_insert_with(|| {
+                                let tileset = map.tilesets.get(tile.tileset)?;
+                                TileAnimation::of_tile(tileset, tile.id)
+                            });
+                    if let Some(animation) = animation {
+                        chunk
+                            .animated
+                            .push((chunk.sprites.len(), animation.clone()));
+                    }
+                    chunk.sprites.push(sprite);
                 }
-                chunks.extend(by_chunk.into_values().map(|sprites| TileChunk {
-                    parallax: layer.parallax,
-                    bounds: bounds(&sprites),
-                    sprites,
+                chunks.extend(by_chunk.into_values().map(|mut chunk| {
+                    chunk.bounds = bounds(&chunk.sprites);
+                    chunk
                 }));
             }
             LayerKind::Image(image) => {
@@ -113,6 +135,7 @@ fn tile_sprite(
         color: layer.color(),
         flip_x: false,
         flip_y: false,
+        flash: Color::TRANSPARENT,
         transform,
         layer: draw_layer,
     })
@@ -155,8 +178,10 @@ fn transform_rect(transform: Affine2, rect: Rect) -> Rect {
     Rect::from_points(corners.map(|c| transform.transform_point2(c))).unwrap_or(rect)
 }
 
-/// Queues the chunks and image layers of every visible tilemap that overlap the view.
+/// Queues the chunks and image layers of every visible tilemap that overlap the view,
+/// with animated tiles on their current frame.
 pub(crate) fn queue_tilemaps(
+    time: Res<Time>,
     maps: Query<(&TilemapState, &GlobalTransform2D, &InheritedVisibility)>,
     images: Res<Assets<Image>>,
     view: Res<FrameView>,
@@ -166,6 +191,7 @@ pub(crate) fn queue_tilemaps(
 ) {
     let visible = view.0.visible_rect(&window);
     let camera = view.0.position;
+    let seconds = time.elapsed_secs();
     for (state, global, shown) in &maps {
         if !shown.get() || (state.chunks.is_empty() && state.images.is_empty()) {
             continue;
@@ -187,9 +213,16 @@ pub(crate) fn queue_tilemaps(
                 culled += chunk.sprites.len() as u32;
                 continue;
             }
-            sprites.extend(chunk.sprites.iter().map(|sprite| QueuedSprite {
-                transform: transform * sprite.transform,
-                ..*sprite
+            let mut animated = chunk.animated.iter().peekable();
+            sprites.extend(chunk.sprites.iter().enumerate().map(|(index, sprite)| {
+                let mut queued = QueuedSprite {
+                    transform: transform * sprite.transform,
+                    ..*sprite
+                };
+                if let Some((_, animation)) = animated.next_if(|(i, _)| *i == index) {
+                    queued.source = Some(animation.source_at(seconds));
+                }
+                queued
             }));
         }
         for image in &state.images {
@@ -238,6 +271,7 @@ fn queue_image(
                 color: image.color,
                 flip_x: false,
                 flip_y: false,
+                flash: Color::TRANSPARENT,
                 transform: copy,
                 layer: image.layer,
             });

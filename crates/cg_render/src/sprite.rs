@@ -66,6 +66,10 @@ pub struct Sprite {
     pub flip_x: bool,
     /// Mirrors the texture vertically.
     pub flip_y: bool,
+    /// Mixes the drawn colour towards this colour by this colour's alpha, keeping the
+    /// sprite's shape and transparency: white at alpha 1 draws a white silhouette, for hit
+    /// flashes. Transparent (the default) leaves the sprite as it is.
+    pub flash: Color,
 }
 
 impl Default for Sprite {
@@ -78,6 +82,7 @@ impl Default for Sprite {
             color: Color::WHITE,
             flip_x: false,
             flip_y: false,
+            flash: Color::TRANSPARENT,
         }
     }
 }
@@ -137,6 +142,8 @@ pub struct SpriteData {
     pub flip_x: bool,
     /// See [`Sprite::flip_y`].
     pub flip_y: bool,
+    /// See [`Sprite::flash`].
+    pub flash: Color,
 }
 
 impl Default for SpriteData {
@@ -150,6 +157,7 @@ impl Default for SpriteData {
             color: sprite.color,
             flip_x: sprite.flip_x,
             flip_y: sprite.flip_y,
+            flash: sprite.flash,
         }
     }
 }
@@ -174,6 +182,7 @@ impl PrefabComponent for Sprite {
             color: data.color,
             flip_x: data.flip_x,
             flip_y: data.flip_y,
+            flash: data.flash,
         })
     }
 }
@@ -220,6 +229,8 @@ pub struct QueuedSprite {
     pub flip_x: bool,
     /// See [`Sprite::flip_y`].
     pub flip_y: bool,
+    /// See [`Sprite::flash`].
+    pub flash: Color,
     /// Where: the world transform the sprite's local quad is mapped through.
     pub transform: Affine2,
     /// Draw order; see [`Layer`].
@@ -237,6 +248,7 @@ impl QueuedSprite {
             color: sprite.color,
             flip_x: sprite.flip_x,
             flip_y: sprite.flip_y,
+            flash: sprite.flash,
             transform: transform.into(),
             layer,
         }

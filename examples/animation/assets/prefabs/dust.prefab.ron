@@ -1,0 +1,24 @@
+// The puff of dust at the alien's feet. It emits nothing by itself (rate 0); the game asks
+// for a few particles at each footstep and more on landing. Specks drift up a little,
+// shrink and fade. Saving this file changes the dust of aliens spawned afterwards (press R).
+(
+    components: {
+        "ParticleEmitter": (
+            settings: (
+                rate: 0,
+                lifetime: (0.25, 0.55),
+                speed: (8, 34),
+                direction: 90,
+                spread: 160,
+                gravity: (0, -30),
+                drag: 3,
+                size: [3, 2, 1],
+                scale: (0.7, 1.3),
+                color: ["#f5efe0e0", "#e6dcc8a0", "#d8ccb400"],
+                shape: Rect((10, 2)),
+                max: 256,
+            ),
+        ),
+        "Layer": (12),
+    },
+)

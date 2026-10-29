@@ -1,6 +1,7 @@
 //! The [`Tilemap`] component: builds a map's tile chunks and spawns its objects as
 //! entities, again whenever the map changes.
 
+use crate::animation::TileAnimation;
 use crate::draw::{self, ImageDraw, TileChunk};
 use crate::map::{
     LayerKind, LayerTile, MapLayer, MapObject, ObjectShape, Properties, PropertyValue, TiledMap,
@@ -276,6 +277,13 @@ fn spawn_object(
         && let Some(sprite) = tile_object_sprite(map, layer, tile, *size)
     {
         entity.insert(sprite);
+        if let Some(animation) = map
+            .tilesets
+            .get(tile.tileset)
+            .and_then(|tileset| TileAnimation::of_tile(tileset, tile.id))
+        {
+            entity.insert(animation);
+        }
     }
     let id = entity.id();
     let prefab = object

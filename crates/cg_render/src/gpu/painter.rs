@@ -234,7 +234,8 @@ impl Painter {
         let blit_shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/blit.wgsl"));
 
         let instance_attributes = wgpu::vertex_attr_array![
-            0 => Float32x2, 1 => Float32x2, 2 => Float32x2, 3 => Float32x4, 4 => Float32x4
+            0 => Float32x2, 1 => Float32x2, 2 => Float32x2, 3 => Float32x4, 4 => Float32x4,
+            5 => Unorm8x4
         ];
         let sprite_pipeline = pipeline(
             device,
