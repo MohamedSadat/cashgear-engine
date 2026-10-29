@@ -655,29 +655,31 @@ Other choices made during the phase:
 ### Verified
 
 - All tests pass; fmt, clippy (desktop and wasm) and rustdoc with warnings denied are clean.
-- The release build, served the way GitHub Pages serves it (under `/cashgear-engine/`, code gzipped) by a scratch Node server. Without wasm-opt, which trunk could not download here (see the known issues), the sizes were:
+- Download size, from CI's web job (with wasm-opt):
 
-  | File | Bytes | Gzipped |
+  | File | Bytes | Transferred |
   | --- | ---: | ---: |
-  | `platformer_bg.wasm` | 11,350,105 | 2,940,733 |
-  | `platformer.js` | 162,287 | 24,626 |
-  | `assets.cgpak` | 2,193,465 | (stored) |
-  | `index.html`, loader, manifest, icons | 27,000 | 13,000 |
-  | **Transferred** | | **about 5.17 MB** |
+  | `platformer_bg.wasm` | 6,162,146 | 2,382,926 (gzipped) |
+  | `platformer.js` | 162,176 | 24,626 (gzipped) |
+  | `assets.cgpak` | 2,193,465 | 2,193,465 |
+  | `index.html`, loader, manifest, icons | 32,167 | 23,053 |
+  | **Total** | | **4,624,093** (budget 8,000,000) |
 
-  For comparison, the debug wasm is 28.3 MB, and a release build with the overlay and before wasm-bindgen was 16.7 MB (4.4 MB gzipped). CI builds with wasm-opt and reports its sizes in the job summary.
+  wasm-opt takes the code from 11.35 MB to 6.16 MB (2.94 MB to 2.38 MB gzipped). For comparison, the debug wasm is 28.3 MB, and a release build with the overlay, before wasm-bindgen and wasm-opt, was 16.7 MB (4.4 MB gzipped).
+- The release build here, served the way GitHub Pages serves it (under `/cashgear-engine/`, code gzipped) by a scratch Node server, built without wasm-opt (trunk could not download it here; see the known issues).
 - The app's browser pane (Chromium, visible), checked by screenshot and script: the loading screen with its bar (on a server throttled to 600 KB/s), then the title; only the code and one `assets.cgpak` request (the preload reused), no loose files; `reading assets from the bundle` in the log; 60 fps through the bot's run on WebGPU and on WebGL2 (`?backend=gl`); the Settings screen with "Fullscreen: Off"; a changed music level saved in `localStorage` (`cashgear/cashgear-platformer/audio-settings.ron`) and back after a reload; the pause menu opening when the canvas lost focus mid-level; the error panel for `?backend=vulkan` ("cannot draw to the window"); in a phone-sized view, the rotate notice in portrait and the touch controls in a landscape level.
 - Headless Chrome 156 and Edge 156 on this machine's GPU, driven by a scratch DevTools script: Chrome at 60 fps on WebGPU through the bot's run; Edge at 60 fps on WebGPU for a full minute (level 1 complete, into level 2) and at 60 fps on WebGL2 (ANGLE on Direct3D 11, the GTX 1650) while the page stayed visible (headless Edge marks a page hidden after about 20 seconds unless told not to, and the game then stops drawing, as it should); in Chrome, choosing Fullscreen in Settings with real key presses put the canvas in fullscreen and the row read "Fullscreen: On".
-- Desktop: `platformer --demo` still finishes the whole game and exits with success.
+- Desktop: `platformer --demo` still finishes the whole game and exits with success, with the same times and coins as in Phase 9.
+- GitHub Pages: CI deployed the wasm-opt build to <https://mohamedsadat.github.io/cashgear-engine/>. Pages serves the code gzipped (2.41 MB) and gzips the bundle too (2.13 MB); in the app's browser pane, `?demo` loads and plays at 60 fps.
 - Not checked by me:
   - Firefox and Safari (not installed here), and a real phone: touch, the rotate notice, fullscreen and landscape lock on Android, "Add to Home Screen" on both.
   - Fullscreen in the app's browser pane, which never grants it; F11 and Alt+Enter on desktop (no screen access).
-  - GitHub Pages and itch.io themselves, until CI has run.
+  - itch.io: uploading the artifact is yours.
   - The audio under load in browsers (cpal's Web Audio output on the main thread): I cannot hear.
 
 ### Manual checks for the user
 
-- Once CI has passed on `main`, open <https://mohamedsadat.github.io/cashgear-engine/> in Chrome, Edge and Firefox: the loading bar, then the title at 60 fps. Play a little; switch to another tab and back: the pause menu should be open and the music paused. Settings: Fullscreen On (Escape leaves it), change a volume and reload: it is kept.
+- Open <https://mohamedsadat.github.io/cashgear-engine/> in Chrome, Edge and Firefox: the loading bar, then the title at 60 fps. Play a little; switch to another tab and back: the pause menu should be open and the music paused. Settings: Fullscreen On (Escape leaves it), change a volume and reload: it is kept.
 - On a phone (Android Chrome and iPhone Safari): open the same address. Upright, the "turn your phone sideways" notice shows; sideways, the game with the d-pad, jump and pause buttons; two fingers at once should work. On Android, Settings, Fullscreen should fill the screen and stay landscape. On both, "Add to Home Screen" (Share, Add to Home Screen on iPhone) and open it from the icon: full screen, landscape.
 - itch.io: download the `platformer-web` artifact from the CI run (Actions, the run, Artifacts), upload the zip as an HTML game, tick "Mobile friendly" and "Fullscreen button", and set the viewport to 1280×720. In the embedded frame, clicking outside the game should pause it.
 - Desktop: `cargo run -p platformer`, then F11 and Alt+Enter go fullscreen and back; Settings, Fullscreen too. Alt-tab away during a level: the pause menu opens.
