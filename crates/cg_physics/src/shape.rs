@@ -22,7 +22,11 @@ pub enum ColliderShape {
 /// What a collider does depends on the other components of its entity:
 ///
 /// - On its own it is **static**: it blocks [`KinematicBody`](crate::KinematicBody)s, as
-///   level geometry made of entities does (crates, doors, moving blocks).
+///   level geometry made of entities does (crates, doors, moving blocks). Static
+///   colliders moved by game code carry the bodies standing on them, lift bodies they
+///   rise into, and push bodies they move into sideways: moving platforms are colliders
+///   moved in [`FixedUpdate`](cg_core::FixedUpdate). With [`OneWay`] it blocks only from
+///   above.
 /// - With a [`Sensor`] it blocks nothing and reports overlaps (coins, triggers, hurt
 ///   boxes).
 /// - With a `KinematicBody` it is the body's shape, moved by the body.
@@ -109,6 +113,16 @@ impl Collider {
 /// In prefabs: `"Sensor": ()`.
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sensor;
+
+/// Makes the entity's static [`Collider`] a one-way platform, like a `one_way` tile:
+/// bodies land on its top, pass through it from below and from the sides, and fall
+/// through it with [`drop_through`](crate::KinematicBody::drop_through). Rays hit it only
+/// from above. The collider is used by its bounding box.
+///
+/// In prefabs: `"OneWay": ()`. Tiled objects get it from a `one_way` property set to
+/// `true` next to `collider`.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OneWay;
 
 /// A collider placed in the world, in world units.
 #[derive(Debug, Clone, Copy, PartialEq)]

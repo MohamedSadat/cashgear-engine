@@ -3,6 +3,19 @@
 All notable changes to CashGear Engine are recorded here, one section per phase.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Phase 9 — Platformer sample game
+
+### Added
+
+- `games/platformer`: the sample game. Kenney's green alien runs, jumps (higher while the button is held, with coyote time and a jump buffer), slides down walls and wall-jumps through three levels made in Tiled: Leafy Woods, Sunset Dunes and Frosty Peaks. Coins, checkpoint flags, springs, moving platforms, an exit door; walkers, spikers (which cannot be stomped), hoppers and bats; spikes and pits. Three hearts per level: a hit costs one with a knock back, a fall costs one and returns to the last checkpoint, and losing the last one is game over. A title screen over a drifting backdrop, level select, settings (volume levels, language, touch controls, controls), a controls screen where each action's two keys and gamepad button can be rebound, pause, level complete, game over and a final screen; a HUD with hearts, coins, time and the level's name; touch controls; English and Arabic. Progress (unlocked levels, best coins and time per level), the controls, the volume levels and the language are saved. `--demo` lets a bot play the whole game from the title screen (an ignored test renders its screens to PNGs); `--level N` starts in a level. Web page on port 8088.
+- `cg_physics`: moving platforms. Static colliders moved by game code carry the bodies standing on them, lift bodies they rise into, and push bodies they move into sideways (as far as walls allow). `PhysicsWorld::motion` says how far a static collider moved in the latest step.
+- `cg_physics`: `OneWay`, which makes a static collider a one-way platform (landed on from above, passed from below and the sides, dropped through with `drop_through`, hit by rays only from above). A prefab component, and set by a Tiled object's `one_way` property next to `collider`. Debug drawing shows one-way colliders in cyan.
+- `cg_platform`: `Binding::just_pressed` (the first key or gamepad button pressed this frame, for "press a key" prompts), `Binding` names for menus (`Display`: `Space`, `K`, `Left`, `Pad A`, `Stick Left`), `Binding::is_key` and `is_gamepad`.
+- `cg_platform`: `Target` (`Desktop`, `Web`, `Android`), so games choose by platform without `#[cfg]`; `Target::can_quit`.
+- `cg_ui`: `UiFocus::set_paused` and `is_paused`, which stop keyboard and gamepad navigation while a prompt waits for any key.
+- New sounds and music, synthesized for the game: a stomp, a spring, a checkpoint chime, a fall, a game-over jingle, and two loops (a desert tune in D Hijaz and a bright one in E Lydian). The meadow and heights tunes and the earlier effects are reused.
+- CI: `platformer --demo`.
+
 ## Phase 8 — Text and UI
 
 ### Added

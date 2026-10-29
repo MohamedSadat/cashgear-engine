@@ -35,7 +35,10 @@ impl Default for Gravity {
 /// floor or ceiling stops the velocity in that direction.
 ///
 /// On the ground the body follows slopes up and down and stays on the ground over small
-/// drops (see [`snap_distance`](Self::snap_distance)). Set the velocity from game code in
+/// drops (see [`snap_distance`](Self::snap_distance)). Standing on a static collider that
+/// game code moves (a moving platform), the body is carried with it; a platform rising
+/// into the body from below lifts it, and a solid one moving into it from the side pushes
+/// it (as far as walls allow). Set the velocity from game code in
 /// [`FixedUpdate`](cg_core::FixedUpdate); the physics moves the body in
 /// [`FixedPostUpdate`](cg_core::FixedPostUpdate), and the contacts are ready in the next
 /// step.
@@ -231,6 +234,7 @@ pub(crate) fn step_body(
     gravity: Vec2,
     dt: f32,
 ) -> Rect {
+    let rect = follow_platforms(env, layers, rect, contacts);
     let mut mover = Mover {
         env,
         layers,
@@ -267,6 +271,67 @@ pub(crate) fn step_body(
     }
     mover.contacts.hazard = touches_hazard(env, layers, rect, &mover.contacts);
     *contacts = mover.contacts;
+    rect
+}
+
+/// Moves `rect` with the static collider it stands on, if that moved in this step, and out
+/// of solid colliders that moved into it from the side.
+fn follow_platforms(
+    env: &Env,
+    layers: CollisionLayers,
+    rect: Rect,
+    contacts: &KinematicContacts,
+) -> Rect {
+    let mut rect = rect;
+    let platform = contacts
+        .ground
+        .filter(|ground| ground.cell.is_none())
+        .and_then(|ground| env.world.entry(ground.entity))
+        .filter(|entry| entry.is_static() && entry.motion != Vec2::ZERO);
+    if let Some(platform) = platform {
+        let motion = platform.motion;
+        let dy = if motion.y > 0.0 {
+            sweep_up(env, layers, rect, motion.y).0
+        } else {
+            motion.y
+        };
+        rect = shifted(rect, vec2(0.0, dy));
+        if motion.x != 0.0 {
+            rect = shifted(rect, vec2(sweep_x(env, layers, rect, motion.x, 0.0).0, 0.0));
+        }
+    }
+    // The furthest push from solid colliders that came in from the side in this step.
+    let mut push = 0.0f32;
+    let mut buffer = Vec::new();
+    for entry in env.world.near(rect, &mut buffer) {
+        if !entry.is_solid() || entry.motion.x == 0.0 || !layers.interacts(entry.layers) {
+            continue;
+        }
+        let b = entry.shape.aabb();
+        if !spans_overlap(b.min.x, b.max.x, rect.min.x, rect.max.x)
+            || !spans_overlap(b.min.y, b.max.y, rect.min.y, rect.max.y)
+        {
+            continue;
+        }
+        let before = shifted(b, -entry.motion);
+        let d = if entry.motion.x > 0.0 {
+            if before.max.x > rect.min.x + EPSILON {
+                continue;
+            }
+            b.max.x - rect.min.x
+        } else {
+            if before.min.x < rect.max.x - EPSILON {
+                continue;
+            }
+            b.min.x - rect.max.x
+        };
+        if d.abs() > push.abs() {
+            push = d;
+        }
+    }
+    if push != 0.0 {
+        rect = shifted(rect, vec2(sweep_x(env, layers, rect, push, 0.0).0, 0.0));
+    }
     rect
 }
 
@@ -427,7 +492,7 @@ fn sweep_x(
     };
     let mut buffer = Vec::new();
     for entry in env.world.near(span, &mut buffer) {
-        if !entry.is_static() || !layers.interacts(entry.layers) {
+        if !entry.is_solid() || !layers.interacts(entry.layers) {
             continue;
         }
         let b = entry.shape.aabb();
@@ -482,7 +547,7 @@ fn sweep_up(env: &Env, layers: CollisionLayers, rect: Rect, dy: f32) -> (f32, Op
     };
     let mut buffer = Vec::new();
     for entry in env.world.near(span, &mut buffer) {
-        if !entry.is_static() || !layers.interacts(entry.layers) {
+        if !entry.is_solid() || !layers.interacts(entry.layers) {
             continue;
         }
         let b = entry.shape.aabb();
@@ -546,18 +611,25 @@ fn find_floor(
             );
         }
     }
+    // Up to the body's top, for colliders that rose into it in this step.
     let span = Rect {
         min: vec2(rect.min.x, lo),
-        max: vec2(rect.max.x, hi_flat.max(bottom)),
+        max: vec2(rect.max.x, hi_flat.max(rect.max.y)),
     };
     let mut buffer = Vec::new();
     for entry in env.world.near(span, &mut buffer) {
-        if !entry.is_static() || !layers.interacts(entry.layers) {
+        if !entry.is_static() || (entry.one_way && !one_way) || !layers.interacts(entry.layers) {
             continue;
         }
         let b = entry.shape.aabb();
         let top = b.max.y;
-        if lo <= top && top <= hi_flat && spans_overlap(b.min.x, b.max.x, rect.min.x, rect.max.x) {
+        // A collider that rose counts if its top was within reach before it moved: it
+        // came up under the body and lifts it.
+        let rise = entry.motion.y.max(0.0);
+        if lo <= top
+            && top - rise <= hi_flat
+            && spans_overlap(b.min.x, b.max.x, rect.min.x, rect.max.x)
+        {
             consider(
                 top,
                 Contact {
@@ -638,6 +710,8 @@ mod tests {
                     layers: CollisionLayers::DEFAULT,
                     sensor: false,
                     body: false,
+                    one_way: false,
+                    motion: Vec2::ZERO,
                     swept: None,
                 });
             }

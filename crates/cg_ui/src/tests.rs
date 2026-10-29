@@ -517,6 +517,17 @@ fn focus_moves_with_the_ui_actions_and_accept_clicks() {
     frame(&mut app);
     // 0.5 s: the first press, then repeats after 0.4 s every 0.11 s.
     assert_ne!(app.world().resource::<UiFocus>().get(), Some(buttons[1]));
+
+    // Paused (a "press a key" prompt), the actions neither move nor click.
+    let focused = app.world().resource::<UiFocus>().get();
+    app.world_mut().resource_mut::<UiFocus>().set_paused(true);
+    tap(&mut app, actions::DOWN);
+    tap(&mut app, actions::ACCEPT);
+    assert_eq!(app.world().resource::<UiFocus>().get(), focused);
+    assert_eq!(app.world().resource::<Seen>().clicks.len(), 1);
+    app.world_mut().resource_mut::<UiFocus>().set_paused(false);
+    tap(&mut app, actions::ACCEPT);
+    assert_eq!(app.world().resource::<Seen>().clicks.len(), 2);
 }
 
 #[test]

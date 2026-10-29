@@ -119,6 +119,7 @@ pub(crate) fn keep_ui_bindings(mut map: ResMut<ActionMap>) {
 pub struct UiFocus {
     pub(crate) focused: Option<Entity>,
     pub(crate) from_keys: bool,
+    pub(crate) paused: bool,
 }
 
 impl UiFocus {
@@ -136,6 +137,18 @@ impl UiFocus {
     /// Whether the focus last moved by keyboard or gamepad (rather than the mouse).
     pub fn from_keys(&self) -> bool {
         self.from_keys
+    }
+
+    /// Stops (or restarts) keyboard and gamepad navigation: while paused, the UI actions
+    /// neither move the focus nor click. For prompts that wait for any key, such as
+    /// rebinding a control. The pointer still works.
+    pub fn set_paused(&mut self, paused: bool) {
+        self.paused = paused;
+    }
+
+    /// Whether navigation is paused.
+    pub fn is_paused(&self) -> bool {
+        self.paused
     }
 
     pub(crate) fn set_from_pointer(&mut self, entity: Entity) {
@@ -259,6 +272,9 @@ pub(crate) fn navigate(
         }
     }
 
+    if focus.paused {
+        return;
+    }
     if let Some((action, direction)) = step {
         let current = focus
             .focused

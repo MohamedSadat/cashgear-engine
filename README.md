@@ -2,7 +2,7 @@
 
 CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WASM) and Android, built with `winit`, `wgpu` and `bevy_ecs`. A sample platformer (`games/platformer`) proves it. The engine is built in 15 phases; see [docs/PLAN.md](docs/PLAN.md) for the plan and [docs/PROGRESS.md](docs/PROGRESS.md) for where it stands.
 
-> **Status:** Phase 8. `cg_core` (app, plugins, fixed-timestep loop, `Time`, schedules), `cg_platform` (window, input, actions, lifecycle, logging, asset IO, save storage), `cg_render` (`wgpu` sprites with hit flashes, camera, virtual resolutions, debug shapes, culling, image and atlas assets), `cg_world` (transforms and hierarchy, interpolation, a game-state stack, RON prefabs), `cg_assets` (handles, background loading, loading states, hot reload), `cg_tiled` (Tiled maps with parallax, chunked tiles, tile animations and object prefabs), `cg_physics` (kinematic bodies with slopes and one-way platforms, tile and entity colliders, sensors, layers, raycasts) and `cg_anim` (Aseprite sprite sheets, animation state machines and events, tweens, CPU particles, camera follow, shake and fades) `cg_audio` (OGG and WAV sounds, streamed music with crossfades, buses with saved volume settings, positional sound) and `cg_ui` (shaped text in TTF, OTF and bitmap fonts with Arabic and right-to-left layouts, nodes with anchors, rows and columns, buttons, sliders and progress bars, keyboard, gamepad, mouse and touch navigation, on-screen touch controls, localization, and an egui debug overlay) work on desktop and web. The platformer sample game arrives in Phase 9.
+> **Status:** Phase 9. `cg_core` (app, plugins, fixed-timestep loop, `Time`, schedules), `cg_platform` (window, input, actions, lifecycle, logging, asset IO, save storage), `cg_render` (`wgpu` sprites with hit flashes, camera, virtual resolutions, debug shapes, culling, image and atlas assets), `cg_world` (transforms and hierarchy, interpolation, a game-state stack, RON prefabs), `cg_assets` (handles, background loading, loading states, hot reload), `cg_tiled` (Tiled maps with parallax, chunked tiles, tile animations and object prefabs), `cg_physics` (kinematic bodies with slopes, one-way platforms and moving platforms, tile and entity colliders, sensors, layers, raycasts) and `cg_anim` (Aseprite sprite sheets, animation state machines and events, tweens, CPU particles, camera follow, shake and fades) `cg_audio` (OGG and WAV sounds, streamed music with crossfades, buses with saved volume settings, positional sound) and `cg_ui` (shaped text in TTF, OTF and bitmap fonts with Arabic and right-to-left layouts, nodes with anchors, rows and columns, buttons, sliders and progress bars, keyboard, gamepad, mouse and touch navigation, on-screen touch controls, localization, and an egui debug overlay) work on desktop and web, and the platformer sample game (`games/platformer`) plays through three levels on both.
 
 ## Workspace layout
 
@@ -24,6 +24,19 @@ CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WAS
 | `tools/cg_pack` | CLI: atlas packing, asset bundling | 4 |
 | `tools/cg_editor` | Desktop scene editor | 13 |
 | `examples/` | One runnable example per feature | from 1 |
+
+## The sample game
+
+`games/platformer` is a short platformer in three levels made in Tiled with Kenney's Pixel Platformer art: run, jump, wall-jump and stomp past walkers, spikers, hoppers and bats, collect coins, raise checkpoint flags, ride moving platforms and springs, and reach the door. Three hearts per level, a title screen, level select, settings with rebindable controls, pause, level-complete and game-over screens, touch controls, English and Arabic, and saved progress.
+
+```sh
+cargo run -p platformer                    # keyboard (arrows or A/D, Space or Up to jump, Down + jump drops, Esc pauses) or gamepad
+cargo run -p platformer -- --demo          # a bot plays the whole game and quits (CI runs this)
+cargo run -p platformer -- --level 2       # straight into a level
+cd games/platformer && trunk serve --port 8088   # web: open http://127.0.0.1:8088
+```
+
+`cargo test -p platformer -- --ignored capture_screens` renders the bot's run to PNGs in `target/platformer-captures/`.
 
 ## Examples
 

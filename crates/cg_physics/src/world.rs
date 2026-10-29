@@ -18,6 +18,10 @@ pub(crate) struct Entry {
     pub layers: CollisionLayers,
     pub sensor: bool,
     pub body: bool,
+    /// A static collider that blocks only from above.
+    pub one_way: bool,
+    /// How far a static collider moved since the previous step.
+    pub motion: Vec2,
     /// For a body that moved in this step, the box covering where it went.
     pub swept: Option<Rect>,
 }
@@ -26,6 +30,11 @@ impl Entry {
     /// Static colliders block bodies; sensors and bodies do not.
     pub fn is_static(&self) -> bool {
         !self.sensor && !self.body
+    }
+
+    /// Static colliders that block bodies from the sides and from below too.
+    pub fn is_solid(&self) -> bool {
+        self.is_static() && !self.one_way
     }
 
     /// What overlaps with sensors and other bodies are tested against: the swept box of a
@@ -117,6 +126,8 @@ pub struct PhysicsWorld {
     index: HashMap<Entity, usize>,
     grids: Vec<GridEntry>,
     hash: SpatialHash,
+    /// The centre of each static collider in the previous step, to find how far it moved.
+    previous: HashMap<Entity, Vec2>,
 }
 
 impl PhysicsWorld {
@@ -140,13 +151,38 @@ impl PhysicsWorld {
         self.index.get(&entity).map(|&i| self.entries[i].shape)
     }
 
+    /// How far a static collider moved in the latest step (zero in the step it appeared).
+    /// Bodies standing on it were carried by as much. `None` for sensors, bodies and
+    /// unknown entities.
+    pub fn motion(&self, entity: Entity) -> Option<Vec2> {
+        let entry = &self.entries[*self.index.get(&entity)?];
+        entry.is_static().then_some(entry.motion)
+    }
+
+    pub(crate) fn entry(&self, entity: Entity) -> Option<&Entry> {
+        self.index.get(&entity).map(|&i| &self.entries[i])
+    }
+
+    /// Forgets the colliders, remembering where the static ones were.
     pub(crate) fn clear(&mut self) {
+        self.previous.clear();
+        for entry in &self.entries {
+            if entry.is_static() {
+                self.previous.insert(entry.entity, entry.shape.center());
+            }
+        }
         self.entries.clear();
         self.index.clear();
         self.grids.clear();
     }
 
-    pub(crate) fn push(&mut self, entry: Entry) {
+    /// Adds a collider. A static one that was there in the previous step gets its motion.
+    pub(crate) fn push(&mut self, mut entry: Entry) {
+        if entry.is_static()
+            && let Some(previous) = self.previous.get(&entry.entity)
+        {
+            entry.motion = entry.shape.center() - *previous;
+        }
         self.index.insert(entry.entity, self.entries.len());
         self.entries.push(entry);
     }
@@ -423,6 +459,7 @@ impl<'a> Env<'a> {
             }
             if let Some((distance, normal)) = entry.shape.raycast(origin, direction, reach)
                 && best.is_none_or(|b| distance < b.distance)
+                && (!entry.one_way || (normal.y > 0.5 && distance > 0.0))
             {
                 reach = distance;
                 best = Some(RayHit {
@@ -560,6 +597,8 @@ mod tests {
             layers: CollisionLayers::DEFAULT,
             sensor: false,
             body: false,
+            one_way: false,
+            motion: Vec2::ZERO,
             swept: None,
         }
     }

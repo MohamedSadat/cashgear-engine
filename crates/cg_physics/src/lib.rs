@@ -5,6 +5,7 @@
 //! | Item | Does |
 //! | --- | --- |
 //! | [`Collider`] | A rectangle or circle on an entity: static by default, a [`Sensor`] or a body's shape |
+//! | [`OneWay`] | Makes a static collider a one-way platform |
 //! | [`KinematicBody`] | Moves by its velocity each fixed step, swept against tiles and static colliders |
 //! | [`KinematicContacts`] | What a body touched: ground, walls, ceiling, hazards |
 //! | [`TileCollider`], [`TileGrid`] | Tile collision; built automatically from Tiled maps |
@@ -71,7 +72,7 @@ pub use debug::PhysicsDebug;
 pub use events::{CollisionEnded, CollisionStarted, Overlaps};
 pub use grid::{TileCell, TileCollider, TileGrid, TileShape};
 pub use layers::CollisionLayers;
-pub use shape::{Collider, ColliderShape, Sensor, WorldShape};
+pub use shape::{Collider, ColliderShape, OneWay, Sensor, WorldShape};
 pub use world::{PhysicsWorld, QueryFilter, RayHit, SpatialQuery, TileHit};
 
 use bevy_ecs::schedule::{IntoScheduleConfigs, SystemSet};
@@ -102,8 +103,8 @@ pub enum PhysicsSystems {
 /// [`CollisionStarted`] and [`CollisionEnded`] messages, the systems that build tile
 /// colliders from Tiled maps (in [`PreUpdate`]), the physics step (in
 /// [`FixedPostUpdate`]), and debug drawing (in [`Render`], when the renderer is there).
-/// Registers `Collider`, `Sensor`, `KinematicBody` and `CollisionLayers` for prefabs and
-/// Tiled properties.
+/// Registers `Collider`, `Sensor`, `OneWay`, `KinematicBody` and `CollisionLayers` for
+/// prefabs and Tiled properties.
 ///
 /// `DefaultPlugins` includes it.
 #[derive(Debug, Clone, PartialEq)]
@@ -149,6 +150,7 @@ impl Plugin for PhysicsPlugin {
             .add_message::<CollisionEnded>()
             .register_component::<Collider>("Collider")
             .register_component::<Sensor>("Sensor")
+            .register_component::<OneWay>("OneWay")
             .register_component::<KinematicBody>("KinematicBody")
             .register_component::<CollisionLayers>("CollisionLayers")
             .add_systems(
@@ -180,8 +182,9 @@ impl Plugin for PhysicsPlugin {
 pub mod prelude {
     pub use crate::{
         Collider, ColliderShape, CollisionEnded, CollisionLayers, CollisionStarted, Gravity,
-        KinematicBody, KinematicContacts, Overlaps, PhysicsDebug, PhysicsPlugin, PhysicsSystems,
-        QueryFilter, RayHit, Sensor, SpatialQuery, TileCell, TileCollider, TileGrid, TileShape,
+        KinematicBody, KinematicContacts, OneWay, Overlaps, PhysicsDebug, PhysicsPlugin,
+        PhysicsSystems, QueryFilter, RayHit, Sensor, SpatialQuery, TileCell, TileCollider,
+        TileGrid, TileShape,
     };
 }
 

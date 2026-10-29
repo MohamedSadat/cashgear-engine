@@ -2808,6 +2808,9 @@ name = "platformer"
 version = "0.1.0"
 dependencies = [
  "cashgear_engine",
+ "pollster",
+ "ron",
+ "serde",
 ]
 
 [[package]]

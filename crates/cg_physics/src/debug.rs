@@ -3,7 +3,7 @@
 use crate::body::KinematicContacts;
 use crate::events::Overlaps;
 use crate::grid::{TileCollider, TileGrid, TileShape};
-use crate::shape::{Collider, Sensor, WorldShape};
+use crate::shape::{Collider, OneWay, Sensor, WorldShape};
 use crate::world::PhysicsWorld;
 use bevy_ecs::prelude::*;
 use cg_core::Rect;
@@ -17,8 +17,8 @@ use std::collections::HashSet;
 /// Whether colliders are drawn, and the key that turns the drawing on and off.
 ///
 /// When enabled, the physics draws with [`DebugShapes`]: the exposed edges of solid tiles
-/// and slope surfaces in blue, one-way platforms in cyan, hazard tiles crossed in red;
-/// static colliders in green, sensors in amber (filled while something overlaps them),
+/// and slope surfaces in blue, one-way platforms (tiles and colliders) in cyan, hazard
+/// tiles crossed in red; static colliders in green, sensors in amber (filled while something overlaps them),
 /// kinematic bodies in magenta (red while touching a hazard) with the sides they touch
 /// in yellow and their ground normal.
 ///
@@ -63,6 +63,7 @@ type ColliderItem = (
     Entity,
     &'static Collider,
     Has<Sensor>,
+    Has<OneWay>,
     Option<&'static KinematicContacts>,
 );
 
@@ -94,7 +95,7 @@ pub(crate) fn draw_debug(
     }
 
     let overlapping: HashSet<Entity> = overlaps.iter().flat_map(|(a, b)| [a, b]).collect();
-    for (entity, collider, sensor, contacts) in &colliders {
+    for (entity, collider, sensor, one_way, contacts) in &colliders {
         let Some(affine) = transforms.get(entity) else {
             continue;
         };
@@ -106,6 +107,7 @@ pub(crate) fn draw_debug(
             Some(contacts) if contacts.hazard => HAZARD,
             Some(_) => BODY,
             None if sensor => SENSOR,
+            None if one_way => ONE_WAY,
             None => STATIC,
         };
         draw_shape(&mut shapes, shape, color, overlapping.contains(&entity));

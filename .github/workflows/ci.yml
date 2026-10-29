@@ -69,6 +69,10 @@ jobs:
           # The UI bot clicks through every screen (both languages, settings, play, pause)
           # with the touch controls and the debug overlay's renderer in the frame.
           run cargo run -p ui -- --demo --overlay
+          # The platformer's bot plays the whole game, from the title screen through the
+          # three levels to the final screen, and quits; it exits with an error if it gets
+          # stuck or loses a level.
+          run cargo run -p platformer -- --demo
       - name: committed atlases are up to date
         run: >-
           cargo run -p cg_pack -- atlas examples/tiled_map/art/characters

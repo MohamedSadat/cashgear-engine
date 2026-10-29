@@ -5,7 +5,7 @@ use crate::body::{Gravity, KinematicBody, KinematicContacts, step_body};
 use crate::events::{CollisionEnded, CollisionStarted, Overlaps};
 use crate::grid::TileCollider;
 use crate::layers::CollisionLayers;
-use crate::shape::{Collider, Sensor};
+use crate::shape::{Collider, OneWay, Sensor};
 use crate::world::{Entry, Env, GridEntry, PhysicsWorld};
 use bevy_ecs::prelude::*;
 use cg_core::Time;
@@ -19,6 +19,7 @@ type ColliderItem = (
     Option<&'static CollisionLayers>,
     Has<Sensor>,
     Has<KinematicBody>,
+    Has<OneWay>,
 );
 
 type BodyItem = (
@@ -42,13 +43,15 @@ pub(crate) fn prepare(
         log::warn!("kinematic body {entity} has no `Collider`, so it does not move");
     }
     world.clear();
-    for (entity, collider, global, layers, sensor, body) in &colliders {
+    for (entity, collider, global, layers, sensor, body, one_way) in &colliders {
         world.push(Entry {
             entity,
             shape: collider.world_shape(global.0),
             layers: layers.copied().unwrap_or_default(),
             sensor,
             body,
+            one_way,
+            motion: Vec2::ZERO,
             swept: None,
         });
     }

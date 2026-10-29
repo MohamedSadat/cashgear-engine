@@ -1,6 +1,6 @@
 [package]
 name = "platformer"
-description = "CashGear Engine sample game: a short 2D platformer."
+description = "CashGear Engine sample game: a short 2D platformer in three levels."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,6 +10,13 @@ publish.workspace = true
 
 [dependencies]
 cashgear_engine.workspace = true
+# The save file and the controls are RON through serde, like the engine's settings.
+ron.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+# The ignored `capture_screens` test renders the screens offscreen.
+pollster.workspace = true
 
 [lints]
 workspace = true

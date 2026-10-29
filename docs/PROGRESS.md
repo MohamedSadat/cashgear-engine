@@ -15,8 +15,8 @@ This file tracks phase status, the decisions made at the start of each phase, kn
 | 6 | Animation and effects | Done | `phase-6` |
 | 7 | Audio | Done | `phase-7` |
 | 8 | Text and UI | Done | `phase-8` |
-| 9 | Platformer sample game | Next | |
-| 10 | Web build | Not started | |
+| 9 | Platformer sample game | Done | `phase-9` |
+| 10 | Web build | Next | |
 | 11 | Android build | Not started | |
 | 12 | Lua scripting | Not started | |
 | 13 | Scene editor | Not started | |
@@ -544,6 +544,71 @@ Other choices made during the phase:
 - On a phone: `cd examples/ui && trunk serve --port 8087 --address 0.0.0.0`, then open the page from the phone on the same network. The d-pad, jump and pause buttons should show by themselves and work with two fingers at once; the menus work by tapping.
 - Please read the Arabic strings in `examples/ui/assets/strings/ar.strings.ron` and correct any wording.
 
+## Phase 9 — Platformer sample game
+
+### Decisions
+
+| Question | Answer |
+| --- | --- |
+| Art and levels | Kenney's Pixel Platformer (CC0), three levels: Leafy Woods (grass, a hill of slopes, planks, a spring, one moving platform), Sunset Dunes (sand, two moving platforms that meet over a pit, a wall-jump shaft, a spring up a wall) and Frosty Peaks (snow, an elevator, clouds, two platforms over spikes, a second shaft up to the summit). Each takes a skilled player under a minute; the bot finishes them in 26, 36 and 38 seconds. |
+| Extra mechanics | Wall slide and wall jump; springs and moving platforms. Moving platforms needed engine work in `cg_physics` (below). No double jump or dash. |
+| Lives and saving | Three hearts per level, shown in the HUD. A hit (enemy, spikes) costs a heart and knocks the player back; a fall costs a heart and returns to the last checkpoint; the last heart ends the level, and "Try again" restarts it with full hearts. Saved: unlocked levels and the best coins and time per level (`progress.ron`), with a level-select screen. |
+| Controls in Settings | Rebinding: each action (left, right, jump, down, pause) has two key slots and a gamepad slot. Choosing a slot waits for a key (or a button for the pad slot); Escape cancels; a key bound elsewhere moves to its new action. Saved as `controls.ron`; Reset restores the defaults. The left stick always moves, and the menus keep their own fixed keys. |
+
+Chosen without asking (said with the questions):
+
+- **Levels by script.** A scratch Python script (not in the repository) wrote the three maps, the title backdrop and the tilesets from a small layout language; they are ordinary TMX files, to be edited in Tiled from now on.
+- **Sound.** The meadow and heights tunes and the Phase 7 effects are reused; a scratch synthesizer (not in the repository) made a stomp, a spring, a checkpoint chime, a fall, a game-over jingle and two loops: Sunset Dunes in D Hijaz at 112 BPM (34 s) and Frosty Peaks in E Lydian at 96 BPM (40 s), both mixed circularly so they loop without a seam.
+- **Languages.** English and Arabic, with the Phase 8 fonts and UI art.
+- **The demo.** `--demo` lets a bot play the whole game from the title screen, as the earlier examples' bots do; CI runs it. It keeps saves in memory, so it never touches the player's.
+
+Other choices made during the phase:
+
+- **Moving platforms in the engine.** `PhysicsWorld` remembers where each static collider was in the previous step, so every static collider moved by game code has a motion. A body standing on one is carried by it first (vertically, then horizontally, swept so walls stop it); a collider that rose into a body from below counts as its floor if its top was within reach before it moved; a solid collider that moved into a body from the side pushes it out (swept, so a wall stops the push and the body stays inside: there is no crushing). No component marks platforms: any static collider moved in `FixedUpdate` behaves this way.
+- **`OneWay` colliders.** One-way entity colliders are skipped by the horizontal and upward sweeps and the side pushes, and count as floors only while not dropping through, like one-way tiles. Rays hit them only from above. The game's platforms are one-way wooden beams, so they never crush or push the player.
+- **Rebinding in the engine.** `Binding::just_pressed` captures the next key or button; `Display` names bindings for menus; `UiFocus::set_paused` stops the menus' own keys while a prompt waits. The game unpauses the focus two frames after a prompt closes, so the key that closed it (Enter, Escape) does not also click or go back.
+- **`Target`** in `cg_platform` replaces a `cfg!` in the game: the title hides Quit on the web, where there is nowhere to quit to.
+- **Player.** A 12×18 body: 125 units per second with 1,100 (ground) and 760 (air) units per second squared of acceleration, a 340 jump (about three tiles) cut to half when the button is let go, 0.1 s of coyote time, a 0.12 s jump buffer, a 70 wall slide, a wall jump of (165, 320) with 0.16 s before the controls steer again and 0.08 s of wall coyote time, a 480 fall cap, a 4-unit step height (so the lip of a platform not quite level with the ground is walked up, not into), and springs at 560. Down plus jump drops through planks.
+- **Enemies** are tile objects of the character tileset with a class: `Walker` (turns at walls, ledges, spikes and the end of an optional `range`), `Spiker` (the same, but stomping it hurts), `Hopper` (hops every 1.3 s, towards a player within 180 units, keeping to `range` of home and off ledges) and `Bat` (flies back and forth on the level's clock, no gravity). A stomp needs the player falling with its feet within 8 units of the enemy's top; the bounce is 250, or 360 with jump held. Touches come from `Overlaps`, so standing in an enemy after invincibility ends still hurts.
+- **Level objects** are tile objects with classes in `tiles.tsx`: `Coin` (animated in Tiled), `Checkpoint` (grey until reached; its sensor reaches down over the pole, since the flag tile sits a tile above the ground), `Spring`, `Exit` (the door); `Platform` rectangles with `dx`, `dy`, `speed` and `phase`, eased at the ends and moved on the level's fixed-step clock, so every run sees them in the same places; `PlayerStart`; `BotHint` rectangles.
+- **Screens** are a state stack: the title (with its own scrolling backdrop map) under the level select, settings and controls; the level under the pause, level-complete, game-over and final screens. Overlays on a level set the time scale to 0. Starting, restarting and leaving levels go through `StateFade`; `set(Playing)` exits the old level (its `StateScoped` entities) and spawns a fresh one.
+- **The bot.** Runs right, jumps by reflex at walls, gaps, spikes and enemies, and follows hints in the maps: `jump`, `board` (wait at an edge for a platform level with the feet), `walljump` (alternate kicks between the shaft's walls) and `right`. Standing on a platform it rides: walks to the platform's leading edge and steps off when ground or another platform is level ahead. Its rays use the world layer only, because `QueryFilter::exclude` holds one entity and excluding the platform would let the player itself be hit. The run is the same on every target and frame rate: the windowed desktop run, the headless test and the browser all finish level 1 in 26.3 s with 15 coins and one hit.
+- **Versions.** No new external dependencies; the game uses `ron` and `serde` from the workspace for its save files.
+
+### Done
+
+- `games/platformer`: modules `level`, `player`, `enemies`, `things`, `progress`, `controls`, `menus`, `hud`, `bot`; three levels, a title backdrop, tilesets, strings in English and Arabic, art, sounds and music; a trunk page on port 8088; `--demo` and `--level N`.
+- `cg_physics`: moving static colliders carry, lift and push bodies; `PhysicsWorld::motion`; `OneWay` (prefab component, Tiled `one_way` property, cyan debug drawing).
+- `cg_platform`: `Binding::just_pressed`, `Display for Binding`, `Binding::is_key`, `Binding::is_gamepad`; `Target` with `can_quit`.
+- `cg_ui`: `UiFocus::set_paused`, `UiFocus::is_paused`.
+- 411 tests (17 more than Phase 8; two ignored captures): platforms carrying, lifting and pushing, one-way colliders and rays, binding names and capture, paused focus; the game's progress and controls, platform paths, every level's objects loading, rebinding with Escape cancelling, game over and "Try again", and the bot playing the whole game without a window (about 2 seconds). The reference PNGs are unchanged.
+- CI: `platformer --demo`.
+
+### Verified
+
+- All tests pass; fmt, clippy (desktop and wasm) and rustdoc with warnings denied are clean.
+- Desktop (Windows, GTX 1650, Vulkan, the default audio device), `platformer --demo`: title, settings, controls, the three levels (26.3 s with 15 of 45 coins and one hit; 35.8 s with 15 of 59; 38.0 s with 19 of 44), pause and resume, all seven checkpoints, the final screen and Quit, at 60 fps with vsync and 8 to 29 draw calls; exit success.
+- Offscreen captures of the bot's run (`cargo test -p platformer -- --ignored capture_screens`), looked at: the title over its backdrop, settings, the controls grid, each level with the HUD and the level's name fading, the pause menu, level complete with "New best!", the final screen.
+- Web (`trunk serve`, the app's browser pane, debug wasm, WebGPU), `?demo`: every asset fetched, 60 fps, and the same run as on desktop, checked by the log and by screenshot in each level.
+- Not checked by me:
+  - Playing by hand with a keyboard, a gamepad or touch, and rebinding a real gamepad button.
+  - Listening: I checked the new sounds by loudness numbers only (the fall and game-over sounds were turned down after that).
+  - Whether the levels are fun and fair for a person, and how hard they are.
+  - The Arabic wording; WebGL2; Firefox and Safari; a phone.
+
+### Manual checks for the user
+
+- Desktop: `cargo run -p platformer`. Play the three levels:
+  - Run and jump; a tap jumps low, a held button high. Jump just after running off a ledge (coyote time) and press jump just before landing (buffer).
+  - Push into a wall while falling: the alien slides slowly; jump to kick off. Climb the shafts in Sunset Dunes and Frosty Peaks this way.
+  - Stomp the blue walkers, the yellow hoppers and the bats; the red spikers hurt from above too. Springs launch you; planks and clouds can be jumped through from below and dropped through with Down and jump.
+  - Ride the wooden beams: they carry you, and you can walk and jump on them.
+  - Lose hearts to spikes and enemies (the knock back and the flash), fall into a pit (back to the last grey flag you raised), and lose all three (game over, Try again).
+- Menus: Levels shows each level's best; Settings has the volume sliders, the language (the whole game in Arabic, mirrored), touch controls and Controls. In Controls choose a slot, press a key (or a button in the gamepad column); Escape cancels; Reset. Quit and run again: progress, controls, volumes and language come back. Delete `%APPDATA%\CashGear\cashgear-platformer\` to start fresh.
+- `cargo run -p platformer -- --demo` watches the bot play; `-- --level 3` starts in Frosty Peaks.
+- Web: `cd games/platformer && trunk serve --port 8088`, open <http://127.0.0.1:8088>; on a phone the touch controls show by themselves.
+- Please read the Arabic strings in `games/platformer/assets/strings/ar.strings.ron` and correct any wording.
+
 ## Known issues
 
 - On the web, `AppExit` stops the loop but leaves the page; there is nowhere to exit to.
@@ -563,7 +628,10 @@ Other choices made during the phase:
 - Kinematic bodies are axis-aligned boxes and collide with every collider as its bounding box; rotated rectangles stay axis-aligned.
 - Slopes carry a body by its foot, so its corners hang over or into the hill; slopes block only from above, so their high side should meet a solid tile or another slope. Ceiling slopes (tiles flipped vertically) collide as solid blocks. A body wider than twice a slope's run climbs it by its corner.
 - Hazard tiles hurt over their whole cell, so a body jumping just over Kenney's low spikes can be hit by the empty top of the cell.
-- Static colliders moved by code do not push or carry kinematic bodies (no moving platforms yet), and bodies do not block each other.
+- Bodies do not block each other. Static colliders moved by code carry, lift and push bodies, but nothing crushes: a body pushed into a wall, or pressed into a ceiling by a rising platform, ends up inside the collider. Keep moving solid colliders away from walls, or use `OneWay` ones.
+- A body carried by a platform leaves it with only its own velocity; the platform's speed is not added to jumps.
+- `PhysicsWorld::motion` compares a collider with where it was in the previous step, so a static collider teleported by code also carries what stands on it, by the whole jump.
+- `QueryFilter::exclude` holds one entity; to leave out two (the asker and the platform it stands on), filter by layer.
 - Overlaps are checked once per step. A fast body is tested by its swept box, which on a diagonal move also covers corners it never crossed.
 - Queries (`SpatialQuery`) see colliders where they were at the end of the latest physics step, not changes made since.
 - Hot-reloading a map rebuilds its collision and respawns its objects; in the `collision` example that restarts the run.
@@ -601,6 +669,11 @@ Other choices made during the phase:
 - Focus moves by geometry only (plus `auto_focus`); there is no explicit tab order.
 - The locale starts in the saved language or the default one; it does not read the system's language. Strings have `{name}` arguments but no plural rules.
 
+- The platformer's controls screen rebinds keys and gamepad buttons, not gamepad axes or the menus' own keys; Escape cannot be bound from the prompt (it cancels), so a pause slot cleared of Escape gets it back only through Reset.
+- The platformer's bot passes its levels by hints placed in the maps and by deterministic timing; a level edited in Tiled may need its hints moved. A run that loses a level fails the demo at once.
+- Platformer enemies are kinematic bodies with simple rules; hoppers and walkers stay within `range` only when the map gives one, and an enemy that falls out of the level is removed.
+- The platformer loads all three maps and every sound before the title screen; music streams. Fine at this size, but a larger game would load levels on demand.
+
 ## Notes for later phases
 
 - **Any phase:** `trunk` only watches the example folder, so touch the example after editing engine crates while `trunk serve` runs.
@@ -634,6 +707,12 @@ Other choices made during the phase:
 - **Phase 13:** the editor can draw with egui through `RenderOverlays` and the same `EguiContext` input feeding; the overlay's `Inspector` registry is the stand-in until `bevy_reflect`.
 - **Phase 14:** profile the layout and text shaping with many nodes; text in world space if a game needs it.
 
+- **Phase 10:** the platformer is the web build's target (`games/platformer`, port 8088). Measure its release wasm and assets (about 2.7 MB of assets now, 1.8 MB of it music). Touch controls show on touch screens; check the d-pad's `down` and the pause button on a phone. The title hides Quit on the web through `Target::can_quit`.
+- **Phase 11:** map the Android back button to `ui_back` (the platformer's menus and pause already read it); `Target::Android` exists; the platformer's saves (`progress.ron`, `controls.ron`, audio settings, language) need the Android `Storage`.
+- **Phase 12:** the plan ports one enemy and the checkpoint logic to Lua: the platformer's `enemies::think` (walker branch) and `things::touch_things` (checkpoint branch) are the Rust versions to match, and `bot` checks the result.
+- **Phase 13:** the editor can place the platformer's objects: tile objects with classes (`Coin`, `Checkpoint`, `Spring`, `Exit`, the enemies) and `Platform` rectangles with `dx`, `dy`, `speed`, `phase`. The level script is gone; Tiled and the editor are the tools now.
+- **Phase 14:** a release of the sample game; a `cargo generate` template can start from `games/platformer`'s layout (modules by subject, a `Game` plugin the tests build without a window, a bot for CI).
+
 ## Backlog
 
 Features that came up but don't serve the platformer or a listed example go here.
@@ -645,7 +724,7 @@ Features that came up but don't serve the platformer or a listed example go here
 - Image-collection tilesets, and isometric or hexagonal maps in `cg_tiled`.
 - Asset bundling in `cg_pack` (the plan's other `cg_pack` job) is Phase 10's.
 - `rapier2d` behind a feature, for dynamic rigid bodies (tumbling crates, ragdolls).
-- Moving platforms that carry bodies, one-way entity colliders, and bodies pushed by moving colliders.
+- Crushing (a body squeezed between a moving collider and a wall), and platform velocity carried into jumps.
 - Partial-cell tile shapes from Tiled's tile collision editor (low spikes, half blocks), and ceiling slopes.
 - Rotated (oriented) boxes and polygon colliders.
 - Outlines as a sprite effect (sampling neighbouring texels; sheets need padding).
@@ -660,3 +739,5 @@ Features that came up but don't serve the platformer or a listed example go here
 - `AudioEmitter` as a prefab component, for emitters set up in prefabs and Tiled properties.
 - UI: clipping and scroll panels, text fields (typing with `TextInput`), checkboxes and dropdowns, tween properties for nodes (offset, opacity), rich text spans, plural rules, reading the system language, `Text2d` in world space, mirroring images in right-to-left layouts.
 - A `cg_pack font` command that bakes a TTF into a BMFont, for hand-editing glyph art.
+- `QueryFilter` excluding several entities.
+- Platformer extras: more levels, a double jump or dash, collectible gems, enemies that throw things, a level timer leaderboard.

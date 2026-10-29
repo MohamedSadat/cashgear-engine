@@ -4,6 +4,7 @@
 use super::{ButtonInput, GamepadAxis, GamepadButton, Gamepads, Pointers, VirtualInput};
 use cg_core::ecs::prelude::*;
 use cg_core::glam::Vec2;
+use core::fmt;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use winit::event::MouseButton;
@@ -23,6 +24,147 @@ pub enum Binding {
     /// A finger touching a region of the window. Only touch pointers count; the mouse
     /// does not.
     Touch(ScreenRegion),
+}
+
+impl Binding {
+    /// The first key or gamepad button pressed in this frame, for "press a key" prompts
+    /// that rebind an action. Keys win over buttons; with several keys pressed in one
+    /// frame, any one of them.
+    ///
+    /// ```
+    /// use cg_platform::input::{Binding, ButtonInput, Gamepads, KeyCode};
+    ///
+    /// let mut keys = ButtonInput::default();
+    /// keys.press(KeyCode::KeyK);
+    /// let pressed = Binding::just_pressed(&keys, &Gamepads::default());
+    /// assert_eq!(pressed, Some(Binding::Key(KeyCode::KeyK)));
+    /// assert_eq!(pressed.unwrap().to_string(), "K");
+    /// ```
+    pub fn just_pressed(keys: &ButtonInput<KeyCode>, gamepads: &Gamepads) -> Option<Self> {
+        if let Some(key) = keys.get_just_pressed().next() {
+            return Some(Self::Key(*key));
+        }
+        gamepads
+            .iter()
+            .find_map(|(_, pad)| pad.buttons().get_just_pressed().next().copied())
+            .map(Self::Gamepad)
+    }
+
+    /// Whether this is a keyboard key.
+    pub fn is_key(&self) -> bool {
+        matches!(self, Self::Key(_))
+    }
+
+    /// Whether this is a gamepad button or axis.
+    pub fn is_gamepad(&self) -> bool {
+        matches!(self, Self::Gamepad(_) | Self::Axis(..))
+    }
+}
+
+/// A short name for menus and prompts: `Space`, `K`, `Left`, `Pad A`, `Stick Left`.
+/// Gamepad buttons are named as on an Xbox pad.
+impl fmt::Display for Binding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Self::Key(key) => f.write_str(&key_name(key)),
+            Self::Mouse(button) => match button {
+                MouseButton::Left => f.write_str("Mouse Left"),
+                MouseButton::Right => f.write_str("Mouse Right"),
+                MouseButton::Middle => f.write_str("Mouse Middle"),
+                MouseButton::Back => f.write_str("Mouse Back"),
+                MouseButton::Forward => f.write_str("Mouse Forward"),
+                MouseButton::Other(n) => write!(f, "Mouse {n}"),
+            },
+            Self::Gamepad(button) => f.write_str(gamepad_button_name(button)),
+            Self::Axis(axis, direction) => {
+                let positive = direction == AxisDirection::Positive;
+                f.write_str(match (axis, positive) {
+                    (GamepadAxis::LeftStickX, false) => "Stick Left",
+                    (GamepadAxis::LeftStickX, true) => "Stick Right",
+                    (GamepadAxis::LeftStickY, false) => "Stick Down",
+                    (GamepadAxis::LeftStickY, true) => "Stick Up",
+                    (GamepadAxis::RightStickX, false) => "R-Stick Left",
+                    (GamepadAxis::RightStickX, true) => "R-Stick Right",
+                    (GamepadAxis::RightStickY, false) => "R-Stick Down",
+                    (GamepadAxis::RightStickY, true) => "R-Stick Up",
+                    (GamepadAxis::LeftTrigger, _) => "LT",
+                    (GamepadAxis::RightTrigger, _) => "RT",
+                })
+            }
+            Self::Touch(_) => f.write_str("Touch"),
+        }
+    }
+}
+
+fn gamepad_button_name(button: GamepadButton) -> &'static str {
+    match button {
+        GamepadButton::South => "Pad A",
+        GamepadButton::East => "Pad B",
+        GamepadButton::West => "Pad X",
+        GamepadButton::North => "Pad Y",
+        GamepadButton::LeftBumper => "LB",
+        GamepadButton::RightBumper => "RB",
+        GamepadButton::LeftTrigger => "LT",
+        GamepadButton::RightTrigger => "RT",
+        GamepadButton::Select => "Back",
+        GamepadButton::Start => "Start",
+        GamepadButton::Mode => "Guide",
+        GamepadButton::LeftStick => "L3",
+        GamepadButton::RightStick => "R3",
+        GamepadButton::DPadUp => "D-pad Up",
+        GamepadButton::DPadDown => "D-pad Down",
+        GamepadButton::DPadLeft => "D-pad Left",
+        GamepadButton::DPadRight => "D-pad Right",
+    }
+}
+
+/// A key's name as printed on a US keyboard, or winit's name for keys without a short one.
+fn key_name(key: KeyCode) -> String {
+    let named = match key {
+        KeyCode::ArrowLeft => "Left",
+        KeyCode::ArrowRight => "Right",
+        KeyCode::ArrowUp => "Up",
+        KeyCode::ArrowDown => "Down",
+        KeyCode::Space => "Space",
+        KeyCode::Enter => "Enter",
+        KeyCode::NumpadEnter => "Num Enter",
+        KeyCode::Escape => "Esc",
+        KeyCode::Backspace => "Backspace",
+        KeyCode::Tab => "Tab",
+        KeyCode::ShiftLeft => "L-Shift",
+        KeyCode::ShiftRight => "R-Shift",
+        KeyCode::ControlLeft => "L-Ctrl",
+        KeyCode::ControlRight => "R-Ctrl",
+        KeyCode::AltLeft => "L-Alt",
+        KeyCode::AltRight => "R-Alt",
+        KeyCode::Comma => ",",
+        KeyCode::Period => ".",
+        KeyCode::Slash => "/",
+        KeyCode::Backslash => "\\",
+        KeyCode::Semicolon => ";",
+        KeyCode::Quote => "'",
+        KeyCode::BracketLeft => "[",
+        KeyCode::BracketRight => "]",
+        KeyCode::Minus => "-",
+        KeyCode::Equal => "=",
+        KeyCode::Backquote => "`",
+        _ => "",
+    };
+    if !named.is_empty() {
+        return named.to_owned();
+    }
+    let debug = format!("{key:?}");
+    for prefix in ["Key", "Digit"] {
+        if let Some(rest) = debug.strip_prefix(prefix)
+            && rest.chars().count() == 1
+        {
+            return rest.to_owned();
+        }
+    }
+    match debug.strip_prefix("Numpad") {
+        Some(rest) => format!("Num {rest}"),
+        None => debug,
+    }
 }
 
 impl From<KeyCode> for Binding {
@@ -623,5 +765,63 @@ mod tests {
             map.bindings("left")[1],
             Binding::Axis(GamepadAxis::LeftStickX, AxisDirection::Negative)
         );
+    }
+
+    #[test]
+    fn bindings_have_short_names() {
+        let names: Vec<String> = [
+            Binding::Key(KeyCode::KeyW),
+            Binding::Key(KeyCode::Digit7),
+            Binding::Key(KeyCode::ArrowLeft),
+            Binding::Key(KeyCode::ShiftLeft),
+            Binding::Key(KeyCode::Numpad4),
+            Binding::Key(KeyCode::F5),
+            Binding::Key(KeyCode::Backslash),
+            Binding::Mouse(MouseButton::Left),
+            Binding::Gamepad(GamepadButton::South),
+            Binding::Gamepad(GamepadButton::DPadUp),
+            Binding::Axis(GamepadAxis::LeftStickX, AxisDirection::Negative),
+            Binding::Touch(ScreenRegion::FULL),
+        ]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+        assert_eq!(
+            names,
+            [
+                "W",
+                "7",
+                "Left",
+                "L-Shift",
+                "Num 4",
+                "F5",
+                "\\",
+                "Mouse Left",
+                "Pad A",
+                "D-pad Up",
+                "Stick Left",
+                "Touch"
+            ]
+        );
+    }
+
+    #[test]
+    fn the_first_pressed_key_or_button_is_captured() {
+        let mut keys = ButtonInput::default();
+        let mut pads = Gamepads::default();
+        assert_eq!(Binding::just_pressed(&keys, &pads), None);
+        pads.connect(GamepadId(0), "pad");
+        pads.press(GamepadId(0), GamepadButton::West);
+        assert_eq!(
+            Binding::just_pressed(&keys, &pads),
+            Some(Binding::Gamepad(GamepadButton::West))
+        );
+        keys.press(KeyCode::KeyJ);
+        assert_eq!(
+            Binding::just_pressed(&keys, &pads),
+            Some(Binding::Key(KeyCode::KeyJ))
+        );
+        assert!(Binding::Key(KeyCode::KeyJ).is_key());
+        assert!(Binding::Gamepad(GamepadButton::West).is_gamepad());
     }
 }

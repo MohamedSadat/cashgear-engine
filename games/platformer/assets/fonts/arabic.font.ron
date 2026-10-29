@@ -1,0 +1,4 @@
+// Noto Kufi Arabic for the Arabic strings. It is not a pixel font, so it is drawn at the
+// screen's resolution with smooth edges. Its own line spacing (1.9 times the size) is
+// roomy for menus; 1.4 keeps rows close to the English ones.
+(file: "NotoKufiArabic.ttf", line_height: Some(1.4))

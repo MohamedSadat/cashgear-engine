@@ -2,7 +2,7 @@
 //! colliders for objects the map marks.
 
 use crate::grid::{TileCell, TileCollider, TileGrid, TileShape};
-use crate::shape::{Collider, Sensor};
+use crate::shape::{Collider, OneWay, Sensor};
 use bevy_ecs::prelude::*;
 use cg_assets::{AssetId, AssetServer, Assets};
 use cg_core::Rect;
@@ -202,7 +202,8 @@ fn summarize(grid: &TileGrid) -> String {
 type NewObjectsWithoutCollider = (Added<TiledObject>, Without<Collider>);
 
 /// Gives map objects whose `collider` or `sensor` property is `true` a [`Collider`] of
-/// their shape (and a [`Sensor`] for `sensor`), unless a prefab already gave them one.
+/// their shape (and a [`Sensor`] for `sensor`, a [`OneWay`] for `one_way`), unless a prefab
+/// already gave them one.
 pub(crate) fn add_object_colliders(
     mut commands: Commands,
     objects: Query<(Entity, &TiledObject), NewObjectsWithoutCollider>,
@@ -218,6 +219,8 @@ pub(crate) fn add_object_colliders(
                 target.try_insert(collider);
                 if sensor {
                     target.try_insert(Sensor);
+                } else if object.properties.bool("one_way") == Some(true) {
+                    target.try_insert(OneWay);
                 }
             }
             None => log::warn!(
