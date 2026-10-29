@@ -171,6 +171,107 @@ impl Camera2D {
     }
 }
 
+/// The UI's coordinate space in a render target: UI pixels from the top-left corner of the
+/// camera's view, y down, and how they map to the target's physical pixels.
+///
+/// It follows the camera's [`ScalingMode`], ignoring zoom: with a virtual resolution
+/// (`PixelPerfect`, `Letterbox`, `Stretch`) the UI is that many UI pixels across and is
+/// scaled with the game, by a whole number in `PixelPerfect`; with `WindowSize` one UI
+/// pixel is one logical pixel. [`Sprites::push_screen`](crate::Sprites::push_screen) draws
+/// in this space.
+///
+/// ```
+/// use cg_core::prelude::*;
+/// use cg_render::Camera2D;
+///
+/// // The default 640x360 pixel-perfect camera in a 1920x1080 window: three times.
+/// let space = Camera2D::default().screen_space(uvec2(1920, 1080), 1.0);
+/// assert_eq!(space.size, vec2(640.0, 360.0));
+/// assert_eq!(space.scale, 3.0);
+/// assert_eq!(space.to_physical(vec2(10.0, 0.0)), vec2(30.0, 0.0));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScreenSpace {
+    /// The size of the view in UI pixels.
+    pub size: Vec2,
+    /// Physical pixels per UI pixel.
+    pub scale: f32,
+    /// Where the view's top-left corner is in the target, in physical pixels.
+    pub origin: Vec2,
+}
+
+impl Default for ScreenSpace {
+    fn default() -> Self {
+        Self {
+            size: DEFAULT_VIRTUAL_RESOLUTION.as_vec2(),
+            scale: 1.0,
+            origin: Vec2::ZERO,
+        }
+    }
+}
+
+impl ScreenSpace {
+    /// The view as a rectangle in UI pixels: from the origin to [`size`](Self::size).
+    pub fn rect(&self) -> Rect {
+        Rect::from_min_size(Vec2::ZERO, self.size)
+    }
+
+    /// A UI position in the target's physical pixels.
+    pub fn to_physical(&self, ui: Vec2) -> Vec2 {
+        self.origin + ui * self.scale
+    }
+
+    /// The UI position at a physical pixel of the target.
+    pub fn from_physical(&self, physical: Vec2) -> Vec2 {
+        (physical - self.origin) / self.scale.max(f32::EPSILON)
+    }
+
+    /// The UI position under a screen position (logical pixels from the window's top-left,
+    /// as in [`Pointers`](cg_platform::input::Pointers)).
+    pub fn from_screen(&self, screen: Vec2, window: &Window) -> Vec2 {
+        self.from_physical(screen * window.scale_factor() as f32)
+    }
+
+    /// The whole target, bars included, in UI pixels.
+    pub fn target_rect(&self, target_size: UVec2) -> Rect {
+        Rect::from_corners(
+            self.from_physical(Vec2::ZERO),
+            self.from_physical(target_size.as_vec2()),
+        )
+    }
+}
+
+impl Camera2D {
+    /// The UI's space in a render target of `target_size` physical pixels with the given
+    /// scale factor; see [`ScreenSpace`].
+    pub fn screen_space(&self, target_size: UVec2, scale_factor: f32) -> ScreenSpace {
+        let unzoomed = Self {
+            zoom: 1.0,
+            ..self.clone()
+        };
+        let viewport = unzoomed.viewport(target_size, scale_factor);
+        let rect = viewport.rect;
+        let (size, scale) = match self.scaling {
+            ScalingMode::WindowSize => {
+                let scale = scale_factor.max(f32::EPSILON);
+                (rect.size() / scale, scale)
+            }
+            ScalingMode::Stretch(size)
+            | ScalingMode::Letterbox(size)
+            | ScalingMode::PixelPerfect(size) => {
+                let size = size.max(UVec2::ONE).as_vec2();
+                let scale = (rect.size() / size).min_element().max(f32::EPSILON);
+                (rect.size() / scale, scale)
+            }
+        };
+        ScreenSpace {
+            size,
+            scale,
+            origin: rect.min,
+        }
+    }
+}
+
 /// A camera's settings together with where it is: everything needed to draw a frame or
 /// convert between world and screen positions.
 ///
@@ -362,6 +463,14 @@ impl MainCamera<'_, '_> {
     pub fn visible_rect(&self) -> Rect {
         self.view().visible_rect(&self.window)
     }
+
+    /// The UI's space in the window; see [`ScreenSpace`].
+    pub fn screen_space(&self) -> ScreenSpace {
+        self.view().camera.screen_space(
+            self.window.physical_size(),
+            self.window.scale_factor() as f32,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -410,6 +519,38 @@ mod tests {
         let viewport = view(ScalingMode::Stretch(uvec2(100, 100))).viewport(uvec2(800, 600), 2.0);
         assert_eq!(viewport.world_size, vec2(100.0, 100.0));
         assert_eq!(viewport.rect.size(), vec2(800.0, 600.0));
+    }
+
+    #[test]
+    fn screen_space_follows_the_scaling_mode_but_not_zoom() {
+        let space = |scaling, size, scale_factor| {
+            Camera2D {
+                scaling,
+                zoom: 3.0,
+                ..Camera2D::default()
+            }
+            .screen_space(size, scale_factor)
+        };
+        // Pixel-perfect: a whole 2x with bars around it.
+        let s = space(ScalingMode::default(), uvec2(1600, 1000), 1.0);
+        assert_eq!(
+            (s.size, s.scale, s.origin),
+            (vec2(640.0, 360.0), 2.0, vec2(160.0, 140.0))
+        );
+        assert_eq!(s.from_physical(vec2(160.0, 140.0)), Vec2::ZERO);
+        assert_eq!(
+            s.target_rect(uvec2(1600, 1000)),
+            Rect::new(-80.0, -70.0, 720.0, 430.0)
+        );
+        // Window size: logical pixels.
+        let s = space(ScalingMode::WindowSize, uvec2(800, 600), 2.0);
+        assert_eq!(
+            (s.size, s.scale, s.origin),
+            (vec2(400.0, 300.0), 2.0, Vec2::ZERO)
+        );
+        // Stretch keeps UI pixels square: the short side decides.
+        let s = space(ScalingMode::Stretch(uvec2(100, 100)), uvec2(800, 400), 1.0);
+        assert_eq!((s.size, s.scale), (vec2(200.0, 100.0), 4.0));
     }
 
     #[test]

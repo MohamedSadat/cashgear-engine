@@ -3,11 +3,16 @@
 
 use crate::batch::{Batcher, SpriteInstance};
 use crate::debug::{ShapeVertex, tessellate};
+use crate::overlay::{OverlayFrame, RenderOverlays};
 use crate::{CameraView, Color, DebugShapes, Filter, Image, QueuedSprite, ScalingMode};
 use bytemuck::{Pod, Zeroable};
 use cg_assets::{AssetId, Assets};
-use cg_core::glam::{Mat4, UVec2, Vec2};
+use cg_core::glam::{Mat4, UVec2, Vec2, Vec3};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Counts painters, so overlays can tell a new GPU device from the old one.
+static PAINTERS: AtomicU64 = AtomicU64::new(0);
 
 /// The format of every texture the engine samples: 8-bit sRGB with alpha.
 const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -17,6 +22,8 @@ pub(crate) struct FrameInput<'a> {
     pub(crate) view: &'a CameraView,
     pub(crate) images: &'a Assets<Image>,
     pub(crate) sprites: &'a [QueuedSprite],
+    /// Screen-space sprites, drawn after the world at the target's resolution.
+    pub(crate) screen_sprites: &'a [QueuedSprite],
     pub(crate) shapes: &'a DebugShapes,
     /// Physical pixels per logical pixel.
     pub(crate) scale_factor: f32,
@@ -61,9 +68,11 @@ enum View {
     Shapes = 1,
     /// Identity: the letterbox background fills the viewport.
     Fill = 2,
+    /// Screen space: UI pixels over the whole target, with pixel snapping.
+    Screen = 3,
 }
 
-const VIEW_COUNT: u64 = 3;
+const VIEW_COUNT: u64 = 4;
 
 /// One uniform buffer holding every [`View`], bound with a dynamic offset. A single
 /// buffer and bind group is also the layout that every backend handles alike; separate
@@ -186,6 +195,7 @@ pub(crate) struct Painter {
     pixel_target: Option<PixelTarget>,
     batcher: Batcher,
     shape_vertices: Vec<ShapeVertex>,
+    generation: u64,
 }
 
 impl Painter {
@@ -300,6 +310,7 @@ impl Painter {
             pixel_target: None,
             batcher: Batcher::default(),
             shape_vertices: Vec::new(),
+            generation: PAINTERS.fetch_add(1, Ordering::Relaxed) + 1,
         }
     }
 
@@ -371,7 +382,8 @@ impl Painter {
         }
     }
 
-    /// Draws a frame into `target` (viewed as this painter's format) and submits it.
+    /// Draws a frame into `target` (viewed as this painter's format), then the overlays,
+    /// and submits it.
     pub(crate) fn render(
         &mut self,
         device: &wgpu::Device,
@@ -379,6 +391,7 @@ impl Painter {
         target: &wgpu::TextureView,
         target_size: UVec2,
         input: &FrameInput<'_>,
+        overlays: Option<&mut RenderOverlays>,
     ) -> FrameStats {
         let camera = &input.view.camera;
         let viewport = input.view.viewport(target_size, input.scale_factor);
@@ -389,7 +402,8 @@ impl Painter {
         let view_proj = input.view.view_projection(viewport.world_size);
 
         // Build this frame's geometry.
-        self.batcher.build(input.sprites, input.images);
+        self.batcher
+            .build(input.sprites, input.screen_sprites, input.images);
         self.shape_vertices.clear();
         if letterbox {
             // The letterbox background: a quad covering the viewport, under everything.
@@ -426,6 +440,10 @@ impl Painter {
             ),
             (View::Shapes, ViewUniform::new(view_proj, size, false)),
             (View::Fill, ViewUniform::new(Mat4::IDENTITY, size, false)),
+            (
+                View::Screen,
+                ViewUniform::new(screen_projection(input, target_size), target_size, true),
+            ),
         ];
         for (view, value) in views {
             self.views.write(queue, view, value);
@@ -453,7 +471,7 @@ impl Painter {
             && let Some(pixel_target) = &self.pixel_target
         {
             let mut pass = begin_pass(&mut encoder, &pixel_target.view, camera.clear_color);
-            stats.draw_calls += self.draw_sprites(&mut pass);
+            stats.draw_calls += self.draw_sprites(&mut pass, View::Sprites);
         }
 
         {
@@ -483,7 +501,20 @@ impl Painter {
                         stats.draw_calls += 1;
                     }
                 } else {
-                    stats.draw_calls += self.draw_sprites(&mut pass);
+                    stats.draw_calls += self.draw_sprites(&mut pass, View::Sprites);
+                }
+                if self.batcher.screen_start < self.batcher.batches.len() {
+                    let full = target_size.as_vec2();
+                    pass.set_viewport(0.0, 0.0, full.x, full.y, 0.0, 1.0);
+                    stats.draw_calls += self.draw_sprites(&mut pass, View::Screen);
+                    pass.set_viewport(
+                        rect.min.x,
+                        rect.min.y,
+                        rect.width(),
+                        rect.height(),
+                        0.0,
+                        1.0,
+                    );
                 }
                 if shape_vertices > fill_vertices {
                     stats.draw_calls +=
@@ -492,20 +523,40 @@ impl Painter {
             }
         }
 
+        if let Some(overlays) = overlays {
+            for overlay in overlays.iter_mut() {
+                overlay.draw(&mut OverlayFrame {
+                    device,
+                    queue,
+                    encoder: &mut encoder,
+                    target,
+                    format: self.format,
+                    size: target_size,
+                    scale_factor: input.scale_factor,
+                    device_generation: self.generation,
+                });
+            }
+        }
+
         queue.submit([encoder.finish()]);
         stats
     }
 
-    /// Draws the sprite batches; returns the number of draw calls.
-    fn draw_sprites(&self, pass: &mut wgpu::RenderPass<'_>) -> u32 {
-        if self.batcher.batches.is_empty() {
+    /// Draws the world sprite batches (`View::Sprites`) or the screen-space ones
+    /// (`View::Screen`); returns the number of draw calls.
+    fn draw_sprites(&self, pass: &mut wgpu::RenderPass<'_>, view: View) -> u32 {
+        let batches = match view {
+            View::Screen => &self.batcher.batches[self.batcher.screen_start..],
+            _ => &self.batcher.batches[..self.batcher.screen_start],
+        };
+        if batches.is_empty() {
             return 0;
         }
         pass.set_pipeline(&self.sprite_pipeline);
-        self.views.bind(pass, View::Sprites);
+        self.views.bind(pass, view);
         let stride = size_of::<SpriteInstance>() as u64;
         let mut draws = 0;
-        for batch in &self.batcher.batches {
+        for batch in batches {
             let Some(bind_group) = self
                 .textures
                 .get(&batch.texture)
@@ -575,6 +626,19 @@ impl Painter {
             bind_group,
         });
     }
+}
+
+/// The matrix from screen space (UI pixels, y down) to clip space over the whole target.
+fn screen_projection(input: &FrameInput<'_>, target_size: UVec2) -> Mat4 {
+    let space = input
+        .view
+        .camera
+        .screen_space(target_size, input.scale_factor);
+    let target = target_size.as_vec2().max(Vec2::ONE);
+    let scale = 2.0 * space.scale / target;
+    let offset = 2.0 * space.origin / target - 1.0;
+    Mat4::from_translation(Vec3::new(offset.x, -offset.y, 0.0))
+        * Mat4::from_scale(Vec3::new(scale.x, -scale.y, 1.0))
 }
 
 fn pipeline(

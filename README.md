@@ -2,7 +2,7 @@
 
 CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WASM) and Android, built with `winit`, `wgpu` and `bevy_ecs`. A sample platformer (`games/platformer`) proves it. The engine is built in 15 phases; see [docs/PLAN.md](docs/PLAN.md) for the plan and [docs/PROGRESS.md](docs/PROGRESS.md) for where it stands.
 
-> **Status:** Phase 7. `cg_core` (app, plugins, fixed-timestep loop, `Time`, schedules), `cg_platform` (window, input, actions, lifecycle, logging, asset IO, save storage), `cg_render` (`wgpu` sprites with hit flashes, camera, virtual resolutions, debug shapes, culling, image and atlas assets), `cg_world` (transforms and hierarchy, interpolation, a game-state stack, RON prefabs), `cg_assets` (handles, background loading, loading states, hot reload), `cg_tiled` (Tiled maps with parallax, chunked tiles, tile animations and object prefabs), `cg_physics` (kinematic bodies with slopes and one-way platforms, tile and entity colliders, sensors, layers, raycasts) and `cg_anim` (Aseprite sprite sheets, animation state machines and events, tweens, CPU particles, camera follow, shake and fades) and `cg_audio` (OGG and WAV sounds, streamed music with crossfades, buses with saved volume settings, positional sound) work on desktop and web. Text and UI arrive in Phase 8.
+> **Status:** Phase 8. `cg_core` (app, plugins, fixed-timestep loop, `Time`, schedules), `cg_platform` (window, input, actions, lifecycle, logging, asset IO, save storage), `cg_render` (`wgpu` sprites with hit flashes, camera, virtual resolutions, debug shapes, culling, image and atlas assets), `cg_world` (transforms and hierarchy, interpolation, a game-state stack, RON prefabs), `cg_assets` (handles, background loading, loading states, hot reload), `cg_tiled` (Tiled maps with parallax, chunked tiles, tile animations and object prefabs), `cg_physics` (kinematic bodies with slopes and one-way platforms, tile and entity colliders, sensors, layers, raycasts) and `cg_anim` (Aseprite sprite sheets, animation state machines and events, tweens, CPU particles, camera follow, shake and fades) `cg_audio` (OGG and WAV sounds, streamed music with crossfades, buses with saved volume settings, positional sound) and `cg_ui` (shaped text in TTF, OTF and bitmap fonts with Arabic and right-to-left layouts, nodes with anchors, rows and columns, buttons, sliders and progress bars, keyboard, gamepad, mouse and touch navigation, on-screen touch controls, localization, and an egui debug overlay) work on desktop and web. The platformer sample game arrives in Phase 9.
 
 ## Workspace layout
 
@@ -38,6 +38,7 @@ Each example is its own binary crate under `examples/`, with an `index.html` for
 | `collision` | A box runs a Tiled test course: 45° and 22.5° slopes, one-way platforms, spikes, crates, coin sensors, a dash and a slam that pass through nothing; F1 draws the colliders, `--demo` lets a bot run it |
 | `animation` | Kenney's alien from an Aseprite sheet, run by a state machine: footstep dust, squash and stretch, hit flashes, spinning coins, a waving Tiled flag, a camera that follows, shakes and zooms, and a fade into a gallery of 10,000 particles; `--demo` lets a bot play |
 | `audio` | The alien's level with sound: footsteps, jumps and landings, coins rising in pitch, a campfire and a fountain that pan as you pass, music that crossfades between two areas, and a volume panel saved between runs; `--demo` lets a bot play |
+| `ui` | A main menu, settings, a HUD and a pause menu in pixel-art UI, navigable by keyboard, gamepad, mouse and touch, in English and Arabic (right to left), with on-screen touch controls and the F12 debug overlay; `--demo` lets a bot click through |
 
 ```sh
 cargo run -p hello_window                  # desktop
@@ -48,6 +49,7 @@ cargo run -p tiled_map                     # edit examples/tiled_map/assets/maps
 cargo run -p collision                     # add -- --demo for the bot, --physics-debug to draw colliders
 cargo run -p animation                     # Z zooms, P opens the particle gallery; -- --demo for the bot
 cargo run -p audio                         # 1-4 pick a bus, -/= change it, M mutes; -- --demo for the bot
+cargo run -p ui                            # F12: debug overlay; -- --touch shows the touch controls, --demo for the bot
 
 cargo install trunk --locked               # once
 cd examples/hello_window && trunk serve    # web: open http://127.0.0.1:8080
@@ -57,9 +59,10 @@ cd examples/tiled_map && trunk serve --port 8083
 cd examples/collision && trunk serve --port 8084
 cd examples/animation && trunk serve --port 8085
 cd examples/audio && trunk serve --port 8086       # sound starts after a key press or click
+cd examples/ui && trunk serve --port 8087          # on a phone the touch controls show by themselves
 ```
 
-Every example takes `--frames N`, `--no-vsync` and `--backend <vulkan|dx12|metal|gl|webgpu>`; on the web they go in the page URL as `?frames=N&no-vsync&backend=gl`. The asset flags are `--hot-reload` / `--no-hot-reload` (on by default in debug desktop builds), `--asset-root <path>` and `--asset-delay <seconds>` (slows loading down to try loading screens). `--physics-debug` starts with colliders drawn (F1 toggles them), and `--no-audio` turns the sound off.
+Every example takes `--frames N`, `--no-vsync` and `--backend <vulkan|dx12|metal|gl|webgpu>`; on the web they go in the page URL as `?frames=N&no-vsync&backend=gl`. The asset flags are `--hot-reload` / `--no-hot-reload` (on by default in debug desktop builds), `--asset-root <path>` and `--asset-delay <seconds>` (slows loading down to try loading screens). `--physics-debug` starts with colliders drawn (F1 toggles them), `--no-audio` turns the sound off, `--touch` / `--no-touch` show or hide the on-screen touch controls, and `--overlay` opens the debug overlay (F12 toggles it).
 
 ### Assets
 
@@ -92,11 +95,14 @@ cargo clippy-wasm  # alias: the same, linted with warnings denied (CI runs this)
 
 CI runs all of these on Windows and Ubuntu for every push to `main` and every pull request.
 
-`cg_render`'s reference-image tests render scenes offscreen and compare them with the PNGs in `crates/cg_render/tests/golden/`. Without a GPU they use a software adapter (WARP on Windows, Mesa lavapipe on Linux) or skip with a note; `CG_REQUIRE_GPU=1` makes a missing adapter a failure, as in CI. After an intended visual change, regenerate and review the references:
+`cg_render`'s and `cg_ui`'s reference-image tests render scenes offscreen and compare them with the PNGs in `crates/cg_render/tests/golden/` and `crates/cg_ui/tests/golden/`. Without a GPU they use a software adapter (WARP on Windows, Mesa lavapipe on Linux) or skip with a note; `CG_REQUIRE_GPU=1` makes a missing adapter a failure, as in CI. After an intended visual change, regenerate and review the references:
 
 ```sh
 CG_UPDATE_GOLDEN=1 cargo test -p cg_render --test golden
+CG_UPDATE_GOLDEN=1 cargo test -p cg_ui --test golden
 ```
+
+`cargo test -p ui -- --ignored capture_screens` renders each screen of the `ui` example's bot run to PNGs in `target/ui-captures/`, for looking at the UI without a window.
 
 ### Portability rules
 

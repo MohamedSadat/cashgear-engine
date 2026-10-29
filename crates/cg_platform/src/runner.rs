@@ -11,7 +11,7 @@
 // `performance.now()` on the web and `std::time::Instant` on desktop.
 #![allow(clippy::disallowed_methods)]
 
-use crate::input::{ButtonInput, KeyCode, MouseButton, PointerId, Pointers};
+use crate::input::{ButtonInput, KeyCode, MouseButton, PointerId, Pointers, TextInput};
 use crate::window::{Lifecycle, LifecycleChanged, Window, WindowConfig, WindowHandle};
 use cg_core::ecs::change_detection::Mut;
 use cg_core::glam::{UVec2, Vec2};
@@ -187,6 +187,12 @@ impl Runner {
         }
         match event {
             WindowEvent::KeyboardInput { event, .. } => {
+                if event.state == ElementState::Pressed
+                    && let Some(text) = &event.text
+                    && let Some(mut typed) = self.app.world_mut().get_resource_mut::<TextInput>()
+                {
+                    typed.push(text);
+                }
                 let PhysicalKey::Code(key) = event.physical_key else {
                     return;
                 };
@@ -291,6 +297,7 @@ impl ApplicationHandler for Runner {
             state.focused = focused;
             // Only browsers hold sound back until the user has interacted.
             state.user_activated = !cfg!(target_arch = "wasm32");
+            state.touch_screen = platform_touch_screen();
             self.app
                 .world_mut()
                 .insert_resource(WindowHandle(window.clone()));
@@ -426,6 +433,20 @@ fn platform_attributes(attributes: WindowAttributes, config: &WindowConfig) -> W
 #[cfg(not(target_arch = "wasm32"))]
 fn platform_window_created(_window: &WinitWindow) -> Option<UVec2> {
     None
+}
+
+/// Whether the device's main pointer is a finger (see [`Window::touch_screen`]).
+#[cfg(not(target_arch = "wasm32"))]
+fn platform_touch_screen() -> bool {
+    cfg!(target_os = "android")
+}
+
+/// `matchMedia("(pointer: coarse)")`: the primary pointer is a finger (phones, tablets).
+#[cfg(target_arch = "wasm32")]
+fn platform_touch_screen() -> bool {
+    web_sys::window()
+        .and_then(|window| window.match_media("(pointer: coarse)").ok().flatten())
+        .is_some_and(|query| query.matches())
 }
 
 /// Per-platform work when the window's size in physical pixels changes.

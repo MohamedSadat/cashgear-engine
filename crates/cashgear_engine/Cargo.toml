@@ -9,7 +9,9 @@ repository.workspace = true
 publish.workspace = true
 
 [features]
-default = []
+default = ["debug-overlay"]
+# The egui debug overlay (F12): frame times, render stats, entities and components.
+debug-overlay = ["cg_ui/debug-overlay"]
 # Lua scripting. Off by default because `mlua` does not build for wasm32-unknown-unknown.
 script = ["dep:cg_script"]
 
@@ -23,7 +25,7 @@ cg_platform.workspace = true
 cg_render.workspace = true
 cg_script = { workspace = true, optional = true }
 cg_tiled.workspace = true
-cg_ui.workspace = true
+cg_ui = { workspace = true, default-features = false }
 cg_world.workspace = true
 
 [lints]

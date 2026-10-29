@@ -56,6 +56,14 @@ impl InheritedVisibility {
 }
 
 /// Hierarchy roots that visibility starts from.
+/// The system set in [`PostUpdate`](cg_core::PostUpdate) that computes
+/// [`InheritedVisibility`]. Systems that read it there go after it.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VisibilitySystems {
+    /// Propagates visibility down the hierarchy.
+    Propagate,
+}
+
 type RootFilter = (Without<ChildOf>, Or<(With<Visibility>, With<Children>)>);
 
 /// An entity's visibility inputs and output, and its children.

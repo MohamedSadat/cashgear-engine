@@ -66,6 +66,9 @@ jobs:
           # The audio bot. A runner without a sound card cannot open the device; the game
           # then runs silent, which this checks too.
           run cargo run -p audio -- --demo
+          # The UI bot clicks through every screen (both languages, settings, play, pause)
+          # with the touch controls and the debug overlay's renderer in the frame.
+          run cargo run -p ui -- --demo --overlay
       - name: committed atlases are up to date
         run: >-
           cargo run -p cg_pack -- atlas examples/tiled_map/art/characters

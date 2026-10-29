@@ -34,7 +34,8 @@ pub use window::{Lifecycle, LifecycleChanged, Window, WindowConfig, WindowHandle
 pub mod prelude {
     pub use crate::input::{
         ActionMap, ActionState, AxisDirection, Binding, ButtonInput, GamepadAxis, GamepadButton,
-        GamepadId, Gamepads, InputPlugin, KeyCode, MouseButton, PointerId, Pointers, ScreenRegion,
+        GamepadId, Gamepads, InputPlugin, InputSystems, KeyCode, MouseButton, PointerId, Pointers,
+        ScreenRegion, TextInput, VirtualInput,
     };
     pub use crate::storage::{Storage, StoragePlugin};
     pub use crate::{

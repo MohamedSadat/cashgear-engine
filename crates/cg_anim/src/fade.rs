@@ -3,7 +3,7 @@
 use crate::ease::Ease;
 use bevy_ecs::prelude::*;
 use cg_assets::AssetId;
-use cg_core::glam::{Affine2, Vec2};
+use cg_core::glam::Vec2;
 use cg_core::{App, Time, Update};
 use cg_platform::Window;
 use cg_render::{Color, FrameView, QueuedSprite, Sprites};
@@ -116,7 +116,8 @@ pub(crate) fn advance_fade(time: Res<Time>, mut fade: ResMut<ScreenFade>) {
     }
 }
 
-/// Queues the fade's colour over the whole view.
+/// Queues the fade's colour over the whole window, in screen space on top of everything,
+/// so menus and other UI fade with the game.
 pub(crate) fn queue_fade(
     fade: Res<ScreenFade>,
     view: Res<FrameView>,
@@ -127,21 +128,21 @@ pub(crate) fn queue_fade(
     if alpha <= 0.0 {
         return;
     }
-    // A little larger than the view, so shake and rounding never show an edge.
-    let visible = view.0.visible_rect(&window);
-    let size = visible.size() * 1.1 + Vec2::splat(4.0);
-    sprites.push(QueuedSprite {
-        texture: AssetId::DEFAULT,
-        size: Some(size),
-        source: None,
-        pivot: Vec2::splat(0.5),
-        color: fade.color.with_alpha(alpha),
-        flip_x: false,
-        flip_y: false,
-        flash: Color::TRANSPARENT,
-        transform: Affine2::from_translation(visible.center()),
-        layer: i32::MAX,
-    });
+    let size = window.physical_size();
+    let space = view
+        .0
+        .camera
+        .screen_space(size, window.scale_factor() as f32);
+    // A little larger than the window, so rounding never shows an edge.
+    let rect = space.target_rect(size);
+    let rect = cg_core::Rect::from_corners(rect.min - Vec2::ONE, rect.max + Vec2::ONE);
+    sprites.push_screen(QueuedSprite::screen_rect(
+        AssetId::DEFAULT,
+        None,
+        rect,
+        fade.color.with_alpha(alpha),
+        i32::MAX,
+    ));
 }
 
 /// Changes the game state behind a fade: the screen fades out, the change is made while

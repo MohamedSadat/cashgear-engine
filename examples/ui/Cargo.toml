@@ -1,0 +1,19 @@
+[package]
+name = "ui"
+description = "CashGear example: a main menu navigable by keyboard, gamepad and touch, localized in English and Arabic, with the debug overlay."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cashgear_engine.workspace = true
+
+[dev-dependencies]
+# The ignored `capture_screens` test renders the screens offscreen.
+pollster.workspace = true
+
+[lints]
+workspace = true

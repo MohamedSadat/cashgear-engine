@@ -3,6 +3,37 @@
 All notable changes to CashGear Engine are recorded here, one section per phase.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Phase 8 — Text and UI
+
+### Added
+
+- `cg_ui`: fonts. `Font` assets from TrueType and OpenType files, BMFont bitmap fonts (`.fnt` with PNG pages) and `.font.ron` files with settings (`pixel`, `line_height`). Pixelify Sans (SIL OFL 1.1) is built in as the default font, sharp at 11 UI pixels and multiples.
+- `cg_ui`: `Text` in a font, size and colour, aligned (`Start`, `Center`, `End`, `Left`, `Right`, `Justified`) and wrapped in its node. Outline fonts are shaped by cosmic-text: Arabic joins, mixed left-to-right and right-to-left text is ordered, and characters missing from a font come from another loaded font. Pixel fonts are rasterized at UI pixels without smoothing, exactly on the pixel grid; others at the screen's resolution. Glyphs live in an atlas drawn by the sprite batcher. `TextSystem` measures text for games too.
+- `cg_ui`: UI nodes. `Node` with widths and heights in pixels, percent, `Auto` (content) or `Fill`, an anchor and offset, padding, a border, and free, row or column layouts with gaps, alignment and justification; `ZIndex`; `ComputedNode` and `UiStack` as results. The UI is laid out in the camera's virtual pixels and scaled with the game; right-to-left languages mirror it (`LayoutDirection` overrides per node).
+- `cg_ui`: widgets. `BackgroundColor`, `BorderColor`, `UiImage` (with nine-slicing), `Button` (sending `Clicked`), `Slider` (dragged or moved by keys, sending `SliderChanged`), `ProgressBar`, with `BarFill` and `SliderThumb` children; `StateColors` and `StateImages` for hovered, pressed and disabled looks; `Interaction`.
+- `cg_ui`: focus navigation by keyboard and gamepad. The `ui_up`, `ui_down`, `ui_left`, `ui_right`, `ui_accept` and `ui_back` actions are bound by default (arrows and WASD, Enter, Space, Escape; d-pad, left stick, south and east buttons); the focus moves to the nearest widget in the pressed direction within the topmost menu, repeats when held and wraps round; `UiFocus`, `Focusable { auto_focus }`. Mouse and touch hover, press and click; `UiPointer::over_ui` tells games when a click hit the UI.
+- `cg_ui`: on-screen touch controls. `TouchButton` and `TouchDpad` press actions through `VirtualInput` while fingers are on them; `TouchControls` shows them on touch screens, after the first touch, or always (`--touch`) or never (`--no-touch`).
+- `cg_ui`: localization. `Strings` tables per language in `.strings.ron` files (with the language's name, direction, and optionally its own font and size), `Locale` with fallback to the default language and `{name}` arguments, `Localized` text that follows the language, and the chosen language saved in `Storage` (`UiPlugin::locale`, `LocaleSettings`).
+- `cg_ui`: the egui debug overlay (feature `debug-overlay`, on by default; F12, or `--overlay`): a frame-time graph, render stats, collider and UI outline toggles, the entity list and a component inspector (values of registered `Debug` types, `Transform2D` editable; `InspectExt::register_inspect`). Game systems can draw their own egui windows through `EguiContext`.
+- `cg_render`: `ScreenSpace`, the UI's coordinate system in the window; a screen-space sprite queue (`Sprites::push_screen`, `QueuedSprite::screen_rect`) drawn after the world at the window's resolution; `RenderOverlay` passes drawn last (`RenderOverlays`); `VisibilitySystems`; `Image::data_mut`.
+- `cg_platform`: `VirtualInput` (actions pressed by on-screen controls, menus and bots), `TextInput` (the text typed each frame), the `InputSystems` sets, and `Window::touch_screen`. `cg_core`: `App::configure_sets`.
+- `examples/ui` (web page on port 8087): a pixel-art main menu, settings (volume sliders, touch controls, the overlay), a HUD with a bitmap-font clock, an energy bar and touch controls, and a pause menu, in English and Arabic; `--demo` lets a bot click through every screen, and an ignored test renders each screen to PNGs.
+- A reference-image test of a UI screen in `crates/cg_ui/tests/golden/`.
+- CI: `ui --demo --overlay`.
+
+### Changed
+
+- `DefaultPlugins` adds `UiPlugin` (field `ui`, flags `--touch`, `--no-touch`, `--overlay`); the prelude includes the UI. The facade's `debug-overlay` feature (default) turns the overlay on.
+- `ScreenFade` draws in screen space over everything, the UI and the bars included, so menus fade with the game.
+- `ActionState` counts actions held or tapped in `VirtualInput`, also ones without bindings.
+- `examples/audio` draws its volume panel with UI nodes, labelled, in screen space, so camera shake no longer moves it.
+- The log filter hides egui-wgpu's messages below errors.
+- New dependencies: cosmic-text 0.19.0 (with swash; no system fonts), egui 0.37.0, egui-wgpu 0.37.0, unicode-script 0.5.8. Fonts: Pixelify Sans (built in) and Noto Kufi Arabic (in the example), both SIL OFL 1.1.
+
+### Fixed
+
+- The sprite batcher's per-sprite instance builder is inlined again; splitting the batcher for the screen queue had cost release bunnymark 0.1 ms a frame at 10,000 sprites.
+
 ## Phase 7 — Audio
 
 ### Added

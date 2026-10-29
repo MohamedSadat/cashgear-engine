@@ -4,10 +4,12 @@ use cg_core::{App, Plugin};
 use log::LevelFilter;
 
 /// Libraries whose routine messages are hidden below a level: `wgpu`'s low-level backend
-/// (harmless driver chatter) and symphonia's OGG reader (a line each time a stream opens).
-const QUIET: [(&str, LevelFilter); 2] = [
+/// (harmless driver chatter), symphonia's OGG reader (a line each time a stream opens) and
+/// egui's renderer (a warning that the engine draws into sRGB targets, which it supports).
+const QUIET: [(&str, LevelFilter); 3] = [
     ("wgpu_hal", LevelFilter::Error),
     ("symphonia", LevelFilter::Warn),
+    ("egui_wgpu", LevelFilter::Error),
 ];
 
 /// Sends `log` records to the terminal (`env_logger`) on desktop and to the browser console
@@ -15,8 +17,8 @@ const QUIET: [(&str, LevelFilter); 2] = [
 ///
 /// On desktop the `RUST_LOG` environment variable overrides [`level`](Self::level), with
 /// the usual `env_logger` syntax such as `RUST_LOG=debug,gilrs=warn`. Without it, `wgpu`'s
-/// low-level backend logs only errors and symphonia (audio decoding) only warnings, which
-/// hides harmless chatter.
+/// low-level backend and egui's renderer log only errors and symphonia (audio decoding)
+/// only warnings, which hides harmless chatter.
 #[derive(Debug, Clone, Copy)]
 pub struct LogPlugin {
     /// The most detailed level to show.

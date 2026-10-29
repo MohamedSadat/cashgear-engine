@@ -10,7 +10,7 @@ use bevy_ecs::message::{
     message_update_system, signal_message_update_system,
 };
 use bevy_ecs::prelude::*;
-use bevy_ecs::schedule::ScheduleLabel;
+use bevy_ecs::schedule::{InternedSystemSet, ScheduleLabel};
 use bevy_ecs::system::ScheduleSystem;
 use core::time::Duration;
 use std::collections::HashSet;
@@ -119,6 +119,18 @@ impl App {
         self.world
             .resource_mut::<Schedules>()
             .add_systems(schedule, systems);
+        self
+    }
+
+    /// Configures system sets in a schedule: their order and run conditions.
+    pub fn configure_sets<M>(
+        &mut self,
+        schedule: impl ScheduleLabel,
+        sets: impl IntoScheduleConfigs<InternedSystemSet, M>,
+    ) -> &mut Self {
+        self.world
+            .resource_mut::<Schedules>()
+            .configure_sets(schedule, sets);
         self
     }
 

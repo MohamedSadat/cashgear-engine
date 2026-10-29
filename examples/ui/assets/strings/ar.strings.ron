@@ -1,0 +1,33 @@
+// Arabic strings for the ui example. Arabic is written right to left, so the whole UI
+// mirrors while it is in use, and its text is drawn in Noto Kufi Arabic (the built-in
+// pixel font has no Arabic letters).
+(
+    language: "ar",
+    name: "العربية",
+    right_to_left: true,
+    font: Some("../fonts/arabic.font.ron"),
+    strings: {
+        "title": "CashGear",
+        "subtitle": "مثال الواجهة",
+        "menu.play": "العب",
+        "menu.settings": "الإعدادات",
+        "menu.language": "اللغة: {name}",
+        "menu.quit": "خروج",
+        "menu.hint": "الأسهم أو WASD للتنقل، Enter للاختيار، Esc للرجوع. F12: لوحة التصحيح.",
+        "settings.title": "الإعدادات",
+        "settings.volume": "مستوى الصوت",
+        "settings.ui_sounds": "أصوات القائمة",
+        "settings.touch": "أزرار اللمس: {mode}",
+        "settings.overlay": "لوحة التصحيح: {state}",
+        "touch.auto": "تلقائي",
+        "touch.on": "تشغيل",
+        "touch.off": "إيقاف",
+        "back": "رجوع",
+        "pause.title": "إيقاف مؤقت",
+        "pause.resume": "استئناف",
+        "pause.menu": "القائمة الرئيسية",
+        "hud.time": "الوقت",
+        "hud.energy": "الطاقة",
+        "play.hint": "اركض واقفز؛ الركض يستهلك الطاقة. Esc للإيقاف المؤقت.",
+    },
+)

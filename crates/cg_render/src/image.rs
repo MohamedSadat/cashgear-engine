@@ -167,6 +167,12 @@ impl Image {
         &self.data
     }
 
+    /// The raw RGBA8 bytes, mutably. Change an image in an `Assets<Image>` through
+    /// `get_mut` so the renderer uploads it again.
+    pub fn data_mut(&mut self) -> &mut [u8] {
+        &mut self.data
+    }
+
     /// The pixel at `(x, y)` from the top-left, if inside the image.
     pub fn pixel(&self, x: u32, y: u32) -> Option<[u8; 4]> {
         if x >= self.width || y >= self.height {

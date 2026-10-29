@@ -8,6 +8,8 @@
 //! | [`Gamepads`] | Connected gamepads, their buttons and axes |
 //! | [`ActionMap`] | Action names and their bindings (set by the game) |
 //! | [`ActionState`] | Which actions are active (read by the game) |
+//! | [`VirtualInput`] | Actions pressed by code: on-screen controls, menus, demo bots |
+//! | [`TextInput`] | The text typed this frame |
 //!
 //! Game code should prefer actions: they merge keyboard, gamepad and touch, and they work
 //! correctly inside [`FixedUpdate`](cg_core::FixedUpdate).
@@ -16,16 +18,30 @@ mod action;
 mod button;
 mod gamepad;
 mod pointer;
+mod text;
+mod virtual_input;
 
 pub use action::{ActionMap, ActionState, AxisDirection, Binding, ScreenRegion};
 pub use button::ButtonInput;
 pub use gamepad::{Gamepad, GamepadAxis, GamepadButton, GamepadId, Gamepads};
 pub use pointer::{Pointer, PointerId, Pointers};
+pub use text::TextInput;
+pub use virtual_input::VirtualInput;
 pub use winit::event::MouseButton;
 pub use winit::keyboard::KeyCode;
 
 use cg_core::ecs::prelude::*;
 use cg_core::{App, FixedPostUpdate, FixedPreUpdate, Last, Plugin, PreUpdate};
+
+/// System sets of the input systems in [`PreUpdate`], in this order.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InputSystems {
+    /// Polls the gamepads.
+    Gamepads,
+    /// Evaluates the [`ActionMap`] into the [`ActionState`]. Systems that press actions
+    /// through [`VirtualInput`] (on-screen controls) run `.before(InputSystems::Actions)`.
+    Actions,
+}
 
 /// Adds the input resources and the systems that maintain them.
 ///
@@ -51,9 +67,18 @@ impl Plugin for InputPlugin {
             .init_resource::<Gamepads>()
             .init_resource::<ActionMap>()
             .init_resource::<ActionState>()
+            .init_resource::<VirtualInput>()
+            .init_resource::<TextInput>()
+            .configure_sets(
+                PreUpdate,
+                (InputSystems::Gamepads, InputSystems::Actions).chain(),
+            )
             .add_systems(
                 PreUpdate,
-                (gamepad::poll_gamepads, action::update_action_state).chain(),
+                (
+                    gamepad::poll_gamepads.in_set(InputSystems::Gamepads),
+                    action::update_action_state.in_set(InputSystems::Actions),
+                ),
             )
             .add_systems(FixedPreUpdate, action::begin_fixed_step)
             .add_systems(FixedPostUpdate, action::end_fixed_step)
@@ -77,7 +102,9 @@ fn clear_input(
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut pointers: ResMut<Pointers>,
     mut gamepads: ResMut<Gamepads>,
+    mut text: ResMut<TextInput>,
 ) {
+    text.clear();
     keys.clear();
     mouse.clear();
     pointers.clear();

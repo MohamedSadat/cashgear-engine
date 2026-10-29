@@ -50,6 +50,7 @@ pub struct Window {
     pub(crate) occluded: bool,
     pub(crate) suspended: bool,
     pub(crate) user_activated: bool,
+    pub(crate) touch_screen: bool,
 }
 
 impl Default for Window {
@@ -61,6 +62,7 @@ impl Default for Window {
             occluded: false,
             suspended: true,
             user_activated: false,
+            touch_screen: false,
         }
     }
 }
@@ -76,7 +78,15 @@ impl Window {
             occluded: false,
             suspended: false,
             user_activated: true,
+            touch_screen: false,
         }
+    }
+
+    /// The same window, marked as being on a touch screen or not (see
+    /// [`touch_screen`](Self::touch_screen)), for tests.
+    pub fn with_touch_screen(mut self, touch_screen: bool) -> Self {
+        self.touch_screen = touch_screen;
+        self
     }
 
     /// Size in physical pixels (what the renderer draws).
@@ -114,6 +124,13 @@ impl Window {
     /// on desktop and Android.
     pub fn user_activated(&self) -> bool {
         self.user_activated
+    }
+
+    /// Whether the device's main pointer is a finger: true on Android and in browsers
+    /// whose primary pointer is coarse (phones and tablets), false on desktop. On-screen
+    /// touch controls use it to show themselves from the start.
+    pub fn touch_screen(&self) -> bool {
+        self.touch_screen
     }
 }
 

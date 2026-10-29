@@ -2,6 +2,7 @@
 
 use super::painter::{FrameInput, FrameStats, Painter};
 use super::{RenderError, describe, request_device};
+use crate::overlay::RenderOverlays;
 use crate::{DebugShapes, FrameView, Image, RenderPlugin, RenderStats, Sprites};
 use bevy_ecs::prelude::*;
 use cg_assets::Assets;
@@ -114,6 +115,7 @@ impl Gpu {
         handle: &WindowHandle,
         size: UVec2,
         input: &FrameInput<'_>,
+        overlays: Option<&mut RenderOverlays>,
     ) -> Result<Option<FrameStats>, RenderError> {
         self.painter
             .sync_textures(&self.device, &self.queue, input.images);
@@ -164,7 +166,7 @@ impl Gpu {
         });
         let stats = self
             .painter
-            .render(&self.device, &self.queue, &view, size, input);
+            .render(&self.device, &self.queue, &view, size, input, overlays);
         handle.winit().pre_present_notify();
         self.queue.present(frame);
         if reconfigure {
@@ -277,6 +279,7 @@ pub(crate) fn render(
     mut sprites: ResMut<Sprites>,
     mut shapes: ResMut<DebugShapes>,
     mut stats: ResMut<RenderStats>,
+    overlays: Option<ResMut<RenderOverlays>>,
     time: Res<Time>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -295,6 +298,7 @@ pub(crate) fn render(
                 view: &view.0,
                 images: &images,
                 sprites: sprites.queued(),
+                screen_sprites: sprites.screen_queued(),
                 shapes: &shapes,
                 scale_factor: window.scale_factor() as f32,
             };
@@ -303,7 +307,12 @@ pub(crate) fn render(
                     if stats.adapter.is_empty() {
                         (stats.adapter, stats.backend) = describe(&gpu.info);
                     }
-                    gpu.frame(&handle, window.physical_size(), &input)
+                    gpu.frame(
+                        &handle,
+                        window.physical_size(),
+                        &input,
+                        overlays.map(ResMut::into_inner),
+                    )
                 }
                 Ok(None) => Ok(None),
                 Err(err) => Err(err),

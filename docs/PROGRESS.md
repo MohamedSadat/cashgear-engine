@@ -14,8 +14,8 @@ This file tracks phase status, the decisions made at the start of each phase, kn
 | 5 | Collision and physics | Done | `phase-5` |
 | 6 | Animation and effects | Done | `phase-6` |
 | 7 | Audio | Done | `phase-7` |
-| 8 | Text and UI | Next | |
-| 9 | Platformer sample game | Not started | |
+| 8 | Text and UI | Done | `phase-8` |
+| 9 | Platformer sample game | Next | |
 | 10 | Web build | Not started | |
 | 11 | Android build | Not started | |
 | 12 | Lua scripting | Not started | |
@@ -468,6 +468,82 @@ Other choices made during the phase:
 - `cargo run -p audio -- --demo` lets the bot play with sound. `--no-audio` runs silent (grey light).
 - Web: `cd examples/audio && trunk serve --port 8086`, open <http://127.0.0.1:8086>. The light blinks yellow until you click or press a key; then the music starts. Switch to another tab: the sound stops; come back: it resumes. Try Firefox and Safari if you have them.
 
+## Phase 8 — Text and UI
+
+### Decisions
+
+| Question | Answer |
+| --- | --- |
+| Arabic and right-to-left text in v1 | Yes, in full. cosmic-text shapes Arabic and orders mixed-direction text, and when the language is right to left the layouts mirror: anchors, offsets, padding, rows, sliders and `Start`/`End` text alignment. A node can opt out with `LayoutDirection` (the example's touch controls do). |
+| UI style | Pixel. The UI is laid out in the camera's virtual pixels (640×360 by default) and scaled by the same whole number as the game, so nine-slice pixel art and pixel fonts stay sharp. The engine also works with smooth UI (`ScalingMode::WindowSize`: one UI pixel per logical pixel). |
+| Languages in the example | English and Arabic. |
+| Fonts and UI art | Pixelify Sans (79 KB) and Noto Kufi Arabic (434 KB), both SIL OFL 1.1, downloaded from github.com/google/fonts with their license files. The panels, buttons, slider parts, touch controls and the HUD's bitmap digits are original pixel art drawn by a scratch script (not in the repository). |
+
+Chosen without asking (said with the questions):
+
+- **Text** goes through cosmic-text (shaping with harfrust, bidirectional text, line breaking) and swash, rasterized into the engine's own glyph atlas and drawn by the sprite batcher, not glyphon's renderer: text needs no second pipeline and sorts with the rest of the UI.
+- **Bitmap fonts** are BMFont's text format (`.fnt` with PNG pages).
+- **UI as entities**: `Node` plus widget components, laid out through `ChildOf`, registered for prefabs; our own layout (anchors, pixel and percent sizes, padding, rows and columns), no flexbox.
+- **Drawing**: a screen-space sprite pass at the window's resolution after the world (after the pixel-perfect upscale), then debug shapes, then egui. `ScreenFade` moved to the top of that pass, so menus fade with the game.
+- **Input**: UI actions with default bindings, focus that moves to the nearest widget in the pressed direction, pointer and touch hit testing. Touch controls press actions through `VirtualInput` (instead of a new `Binding`), show after the first touch or with `--touch`, and hide on key or gamepad input.
+- **egui overlay** fed from the engine's own input (no egui-winit), drawn last, behind the `debug-overlay` feature (on by default), F12 toggles it. The inspector shows every component by name and the values of registered `Debug` types; `Transform2D` is editable. Reflection waits for Phase 13.
+- **Localization**: one `strings/<lang>.strings.ron` per language, `{name}` arguments, the default language as fallback, hot reloading, the chosen language saved in `Storage`.
+
+Other choices made during the phase:
+
+- **Screen space.** `ScreenSpace` (in `cg_render`) is the UI's coordinate system: UI pixels from the top-left of the camera's view, y down, with the physical scale and origin. It follows the scaling mode but not zoom: `PixelPerfect` and `Letterbox` use the virtual resolution, `Stretch` keeps UI pixels square (the short side decides), `WindowSize` uses logical pixels. `Sprites::push_screen` queues sprites there; `QueuedSprite::screen_rect` maps a rectangle the right way up. Screen sprites are sorted by layer only, so the UI draws in queue order, and they bind their own uniform slot (`View::Screen`) with pixel snapping on.
+- **Overlays.** `cg_render::RenderOverlays` holds `RenderOverlay` passes that record into the frame's encoder after everything else; `OverlayFrame::device_generation` tells them when the device was recreated. egui uses it; the editor can too.
+- **Layout.** Runs every frame in `PostUpdate` after visibility: localized text is applied, bars are sized, then each root (a `Node` without a `Node` parent) is laid out against the screen. `Val::Auto` sizes come from text, an image's size or the children; `Val::Fill` shares a row's leftover space. Rectangles are snapped to physical pixels, so nine-slice pieces meet without seams. Hidden nodes keep their space. Right-to-left mirroring happens while placing children (it is the parent's direction that decides where a child goes). The result is `ComputedNode` (rectangle, content box, z-index layer, depth-first order, direction, visibility) and `UiStack`, every visible node in draw order, which hit testing walks backwards.
+- **Text layout.** `TextLayout` caches a text's natural size and up to eight wrapped sizes, and its glyphs with the width, scale, font revision and direction they were made for. Text is centred vertically in its node's content box. `Start` and `End` follow the node's direction (as in CSS), not the paragraph's.
+- **Rasterizing.** Pixel fonts (`FontSettings::pixel`) are rasterized at UI pixels, with hinting off, glyphs on whole UI pixels and coverage thresholded at half, so they are exactly sharp at any whole scale (a test checks every 2×2 block). Other fonts are rasterized at the screen's scale with smooth edges and drawn one texel per physical pixel. The atlas has up to four 1024×1024 pages; when they fill, it starts again and all text is laid out once more.
+- **Fonts.** The default `Handle<Font>` is Pixelify Sans, built into `cg_ui` (sharp at 11 UI pixels and multiples; `DEFAULT_FONT_SIZE`). cosmic-text's fallback lists name system fonts the engine never loads, so `cg_ui` gives it empty ones: a character the text's font lacks is found in any loaded font (Arabic in an English font's text, Latin in the Arabic font's). `.font.ron` files name a font file with settings (`pixel`, `line_height`). Noto Kufi's own spacing is 1.9 times the size; the example sets 1.4.
+- **Bitmap fonts** lay out left to right with kerning and word wrap, at `size / font.size()` times, and are drawn straight from their pages.
+- **Widgets.** `Button` (with `Clicked`), `Slider` (with `SliderChanged`; dragging, keys, steps), `ProgressBar`, with `BarFill` and `SliderThumb` children positioned from the value; `StateColors` and `StateImages` show hovered, pressed and disabled states (focus shows as hovered). `UiImage` draws an image or a nine-slice (corners at one texel per UI pixel, shrinking evenly when the node is smaller).
+- **Pointers.** In `PreUpdate` after the actions: the topmost interactive node under each pointer gets it; a press captures it until release, and a release over the same node clicks. The mouse hovering a widget moves the focus there. `UiPointer::over_ui` tells games whether a click landed on the UI. While the egui overlay uses the pointer, the game UI ignores it.
+- **Focus.** Candidates are the focusable nodes of the topmost UI tree that has any (a pause menu over the HUD, a dialog over a menu). Directions pick the closest widget along the direction, weighting sideways distance double, and wrap round to the far end of the same line. Held directions repeat after 0.4 s every 0.11 s, on real time, so paused games navigate. When a menu opens and the player is on keys or a gamepad, its first widget (or the one marked `Focusable { auto_focus }`) gets the focus at once; the example's bot found the case where Enter did nothing without it. `ui_back` does nothing by itself; menus read it.
+- **Default UI bindings** are added for actions the map lacks, at build time and whenever the game replaces its `ActionMap`.
+- **Touch controls.** `TouchButton`s hold their action while a finger is within 6 UI pixels of them; a `TouchDpad` presses the actions within 67.5 degrees of the finger's direction from its centre (two on diagonals) and keeps following that finger past its edge. `TouchMode::Always` also takes the mouse, for trying them on desktop. `Window::touch_screen` (new) is `matchMedia("(pointer: coarse)")` on the web and true on Android.
+- **Input additions in `cg_platform`.** `VirtualInput` (held and tapped actions that `ActionState` counts like bindings, with or without an entry in the map), `TextInput` (the text typed each frame, for egui), `InputSystems` sets, and `App::configure_sets` in `cg_core`.
+- **egui.** The overlay builds its windows in an exclusive system in `Render`, so the inspector can read and edit any component, then hands the triangles and texture changes to its `RenderOverlay` through a shared buffer. egui's texture changes must be cleared after use (epaint 0.37 panics on dropping them otherwise; found in the browser). Game systems can draw their own windows through `EguiContext` while the overlay is open. With the overlay on, bevy's `debug` feature names component types for the inspector; it costs nothing measurable.
+- **Performance.** The batcher's world and screen queues share one generic `append`, which stopped `instance()` from being inlined: release bunnymark lost 0.1 ms a frame at 10,000 sprites until it was marked `#[inline]` (found by running a Phase 7 build back to back). An empty UI costs nothing measurable.
+- **Versions.** cosmic-text 0.19.0 (`std` and `swash` only: no system fonts), egui 0.37.0 (with its default fonts), egui-wgpu 0.37.0, unicode-script 0.5.8 (the script type cosmic-text's fallback trait names).
+
+### Done
+
+- `cg_ui`: `Font`, `FontKind`, `OutlineFont`, `BitmapFont`, `BitmapGlyph`, `FontSettings`, `FontFile`, `FontLoader`, `FontError`, `DEFAULT_FONT_SIZE`; `Text`, `TextStyle`, `TextAlign`, `TextData`, `TextLayout`, `PositionedGlyph`, `TextSystem`; `Node`, `Val`, `Anchor`, `Edges`, `Layout`, `Align`, `Justify`, `LayoutDirection`, `ZIndex`, `ComputedNode`, `UiStack`; `BackgroundColor`, `BorderColor`, `UiImage`, `UiImageData`, `Button`, `Clicked`, `Interaction`, `Focusable`, `StateColors`, `StateImages`, `Slider`, `SliderChanged`, `ProgressBar`, `BarFill`, `SliderThumb`; `UiFocus`, `actions`, `UiPointer`; `TouchControls`, `TouchMode`, `TouchControl`, `TouchButton`, `TouchDpad`; `Strings`, `StringsFile`, `StringsLoader`, `Locale`, `LocaleSettings`, `Localized`; `DebugOverlay`, `EguiContext`, `Inspector`, `InspectExt` and `egui` (feature `debug-overlay`); `UiPlugin`, `UiSystems` and a prelude. The embedded Pixelify Sans with its license in `crates/cg_ui/fonts/`.
+- `cg_render`: `ScreenSpace` (with `Camera2D::screen_space` and `MainCamera::screen_space`), the screen-space queue (`Sprites::push_screen`, `screen_queued`, `QueuedSprite::screen_rect`) and its pass, `RenderOverlay`, `RenderOverlays`, `OverlayFrame`, `VisibilitySystems`, `Image::data_mut`.
+- `cg_platform`: `VirtualInput`, `TextInput`, `InputSystems`, `Window::touch_screen` (and `with_touch_screen`), quieter egui-wgpu logs. `cg_core`: `App::configure_sets`.
+- `cg_anim`: `ScreenFade` draws in screen space, over the UI and the bars.
+- `cashgear_engine`: `DefaultPlugins` adds `UiPlugin` (field `ui`, flags `--touch`, `--no-touch`, `--overlay`) and registers the animation, audio and Tiled components with the inspector; the `debug-overlay` feature (default); the prelude includes the UI.
+- `examples/ui` (new, with a trunk page on port 8087): main menu, settings, HUD with touch controls, pause menu, English and Arabic, `--demo` bot, and an ignored test that renders every screen to PNGs. `examples/audio`'s volume panel is now UI nodes in screen space.
+- 394 tests (49 more than Phase 7; one more, the screen capture, is ignored), including a reference image of a UI screen (panel, border, pixel text, nine-slice, bar, a right-to-left row) and exact checks that pixel text sits on the pixel grid; layout of anchors, rows, columns, fill and padding; mirroring; text sizes, wrapping, crisp and smooth glyphs, Arabic shaping and fallback, bitmap fonts with kerning; clicks, states, disabled buttons; focus moves, wrapping, repeats, menus on top; sliders by drag and keys, right to left too; touch buttons and the d-pad; localization with fallback, arguments, fonts and direction; the screen-space queue order; the overlay; and the example's bot through every screen.
+- CI: `ui --demo --overlay`.
+
+### Verified
+
+- All tests pass, the reference images too (the new UI one on Vulkan with a GTX 1650 and on WARP). fmt, clippy (desktop and wasm) and rustdoc with warnings denied are clean.
+- Desktop (Windows, GTX 1650, Vulkan), `ui --demo`: menu, Arabic and back, settings, play, pause and quit at 60 fps with vsync, 10 to 24 draw calls, exit success; with `--overlay` as well. The other examples still run as CI runs them, without warnings.
+- Offscreen captures of every screen of the bot's run (`cargo test -p ui -- --ignored capture_screens`), looked at: the English and Arabic menus (Arabic joined, right to left, with Latin words in place, the whole menu mirrored), settings over the dimmed menu, the HUD with the bitmap-font clock, the energy bar and the touch d-pad, jump and pause buttons, and the pause menu. Magnified, the pixel font is exact 2×2 blocks and the Arabic is smooth.
+- Web (`trunk serve`, the app's browser pane, debug wasm): on WebGPU the menu, keyboard navigation by script-made key events, the Play screen with its HUD, and the debug overlay with its frame graph and render stats (1280×720 at scale 1, the UI 640×360 at 2); on WebGL2 (`?backend=gl`, ANGLE on Direct3D 11) the loading bar, the menu and the overlay, in the same 13 draw calls. The overlay crashed the page at first (the egui texture panic above); fixed and checked again. The pane was hidden, so frame rates there mean nothing.
+- Release bunnymark at 10,000 sprites: about 1.41 to 1.43 ms a frame, level with a Phase 7 build run back to back.
+- Not checked by me:
+  - A real touch screen (phone or tablet), a gamepad, and mouse play on desktop.
+  - The desktop window by screenshot, Firefox and Safari.
+  - The Arabic wording, which a native reader should check.
+  - The click sounds, by ear.
+
+### Manual checks for the user
+
+- Desktop: `cargo run -p ui`.
+  - Move with arrows, WASD, a gamepad's d-pad or stick: the focused button turns light blue with a gold frame; Enter, Space or the south button chooses. Hover and click with the mouse.
+  - Language switches to Arabic: every screen mirrors (the menu text, the settings rows, the HUD in the top right) and the text is Noto Kufi; switch back. Restart: the language is remembered.
+  - Settings: the sliders change the volume and the menu-click level (left and right while focused, or drag); "Touch controls" cycles Auto, On, Off; "Debug overlay" opens it. Escape goes back.
+  - Play: run and jump; the clock counts and running drains the energy bar. Escape or P pauses; Resume, Settings or Main menu.
+  - F12: the overlay. Open "Entities", click one (the alien) and drag its position in the inspector; tick "UI outlines" and "Colliders".
+- `cargo run -p ui -- --touch` shows the touch controls on desktop (the mouse can press them); `--demo` lets the bot click through.
+- On a phone: `cd examples/ui && trunk serve --port 8087 --address 0.0.0.0`, then open the page from the phone on the same network. The d-pad, jump and pause buttons should show by themselves and work with two fingers at once; the menus work by tapping.
+- Please read the Arabic strings in `examples/ui/assets/strings/ar.strings.ron` and correct any wording.
+
 ## Known issues
 
 - On the web, `AppExit` stops the loop but leaves the page; there is nowhere to exit to.
@@ -511,7 +587,19 @@ Other choices made during the phase:
 - `AudioEmitter` is not a prefab component yet; the example turns Tiled objects into emitters in game code.
 - Whether a sound is streamed depends only on its length (`stream_longer_than`); there are no per-file loader settings.
 - `Storage` is synchronous and meant for small values; on Android it stores nothing until Phase 11.
-- The example's volume panel is sprites parented to the camera, so camera shake moves the view under it; Phase 8's UI layer will draw such things in screen space.
+
+- UI nodes are not clipped: children and text that overflow a node draw outside it, and there are no scrolling panels.
+- Hidden nodes keep their space in the layout; there is no "display: none". Despawn or move a node to take it out.
+- The layout runs over every node each frame (text is cached). Menus and HUDs cost nothing measurable; a UI of thousands of nodes would want dirty tracking.
+- Images do not mirror in right-to-left layouts; an arrow icon points the same way in Arabic.
+- Bitmap fonts have no shaping and run left to right only, so Arabic needs an outline font. `TextAlign::Justified` works for outline fonts only.
+- Pixel fonts are sharp only at multiples of their pixel grid (11 UI pixels for the built-in Pixelify Sans); other sizes threshold unevenly.
+- Smooth fonts are rasterized at the screen's scale, so resizing the window rasterizes their glyphs again. The glyph atlas holds up to four 1024×1024 pages (16 MB in memory and on the GPU when full); when they fill, it starts again and every text is laid out once more.
+- There is no text in world space (a `Text2d`); text is UI only.
+- A first touch shows the touch controls but does not press one; the next touch does.
+- The egui overlay gets the engine's input: no IME, clipboard or cursor shapes. Keys typed into its fields still reach the game. egui draws into the sRGB frame, so its blending differs a little from egui's own look.
+- Focus moves by geometry only (plus `auto_focus`); there is no explicit tab order.
+- The locale starts in the saved language or the default one; it does not read the system's language. Strings have `{name}` arguments but no plural rules.
 
 ## Notes for later phases
 
@@ -539,6 +627,13 @@ Other choices made during the phase:
 - **Phase 12:** Lua bindings for `Audio` (play, music, settings).
 - **Phase 14:** decode streams on a worker thread on desktop, with the asset loads.
 
+- **Phase 9:** build the menus from `examples/ui`: the `panel`, `button` and `slider_row` helpers, `StateImages` for button frames, `Localized` text with `strings/*.strings.ron`, a settings screen on `AudioSettings` and `TouchControls::mode`, a HUD with a bitmap font, and `TouchDpad`/`TouchButton` controls in a left-to-right root. Pausing pushes a state and sets the time scale to 0; menus still navigate on real time. Check `UiPointer::over_ui` before using clicks in the world.
+- **Phase 10:** measure what cosmic-text, egui and the embedded font add to a release wasm build, and consider building web releases without the `debug-overlay` feature. Try the touch controls in mobile browsers (`Window::touch_screen` comes from `(pointer: coarse)`).
+- **Phase 11:** map the Android back button to `ui_back`; keep UI anchors inside safe-area insets (a margin on `ScreenSpace` or the root nodes).
+- **Phase 12:** Lua bindings for UI text, buttons (`Clicked`) and the locale.
+- **Phase 13:** the editor can draw with egui through `RenderOverlays` and the same `EguiContext` input feeding; the overlay's `Inspector` registry is the stand-in until `bevy_reflect`.
+- **Phase 14:** profile the layout and text shaping with many nodes; text in world space if a game needs it.
+
 ## Backlog
 
 Features that came up but don't serve the platformer or a listed example go here.
@@ -563,3 +658,5 @@ Features that came up but don't serve the platformer or a listed example go here
 - Seeking and loop regions in streams; audio sprites (several sounds in one file); per-file loader settings (force streaming).
 - MP3 and FLAC (symphonia features), if a game needs them.
 - `AudioEmitter` as a prefab component, for emitters set up in prefabs and Tiled properties.
+- UI: clipping and scroll panels, text fields (typing with `TextInput`), checkboxes and dropdowns, tween properties for nodes (offset, opacity), rich text spans, plural rules, reading the system language, `Text2d` in world space, mirroring images in right-to-left layouts.
+- A `cg_pack font` command that bakes a TTF into a BMFont, for hand-editing glyph art.

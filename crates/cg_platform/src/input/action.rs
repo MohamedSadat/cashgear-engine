@@ -1,7 +1,7 @@
 //! Named actions: [`ActionMap`] binds keys, mouse buttons, gamepad buttons and axes and
 //! touch regions to names; [`ActionState`] says which actions are active.
 
-use super::{ButtonInput, GamepadAxis, GamepadButton, Gamepads, Pointers};
+use super::{ButtonInput, GamepadAxis, GamepadButton, Gamepads, Pointers, VirtualInput};
 use cg_core::ecs::prelude::*;
 use cg_core::glam::Vec2;
 use serde::{Deserialize, Serialize};
@@ -183,6 +183,7 @@ pub(crate) struct Inputs<'a> {
     pub mouse: &'a ButtonInput<MouseButton>,
     pub gamepads: &'a Gamepads,
     pub pointers: &'a Pointers,
+    pub virtual_input: &'a VirtualInput,
 }
 
 impl Inputs<'_> {
@@ -302,19 +303,30 @@ impl ActionState {
             .map(|(name, _)| name.as_str())
     }
 
-    /// Evaluates every action of the map against this frame's input.
+    /// Evaluates every action of the map, and every action pressed through
+    /// [`VirtualInput`], against this frame's input.
     pub(crate) fn update(&mut self, map: &ActionMap, inputs: &Inputs) {
-        self.actions
-            .retain(|name, _| map.actions.contains_key(name.as_str()));
-        for (name, bindings) in &map.actions {
-            let (active, value) = bindings
+        // Actions that are neither in the map nor pressed virtually are dropped once they
+        // have been released, so their release is still seen.
+        self.actions.retain(|name, data| {
+            map.actions.contains_key(name.as_str())
+                || inputs.virtual_input.active(name)
+                || data.pressed
+        });
+        for name in map.actions().chain(inputs.virtual_input.active_names()) {
+            if !self.actions.contains_key(name) {
+                self.actions.insert(name.to_owned(), ActionData::default());
+            }
+        }
+        for (name, data) in &mut self.actions {
+            let (bound, value) = map
+                .bindings(name)
                 .iter()
                 .map(|b| inputs.evaluate(b, map))
                 .fold((false, 0.0f32), |(a, v), (ba, bv)| (a || ba, v.max(bv)));
-            let data = match self.actions.get_mut(name.as_str()) {
-                Some(data) => data,
-                None => self.actions.entry(name.clone()).or_default(),
-            };
+            let pressed_virtually = inputs.virtual_input.active(name);
+            let active = bound || pressed_virtually;
+            let value = if pressed_virtually { 1.0 } else { value };
             data.just_pressed = active && !data.pressed;
             data.just_released = !active && data.pressed;
             data.pressed = active;
@@ -343,6 +355,7 @@ pub(crate) fn update_action_state(
     mouse: Res<ButtonInput<MouseButton>>,
     gamepads: Res<Gamepads>,
     pointers: Res<Pointers>,
+    mut virtual_input: ResMut<VirtualInput>,
     mut state: ResMut<ActionState>,
 ) {
     state.update(
@@ -352,8 +365,10 @@ pub(crate) fn update_action_state(
             mouse: &mouse,
             gamepads: &gamepads,
             pointers: &pointers,
+            virtual_input: &virtual_input,
         },
     );
+    virtual_input.end_update();
 }
 
 pub(crate) fn begin_fixed_step(mut state: ResMut<ActionState>) {
@@ -376,6 +391,7 @@ mod tests {
         mouse: ButtonInput<MouseButton>,
         gamepads: Gamepads,
         pointers: Pointers,
+        virtual_input: VirtualInput,
         state: ActionState,
     }
 
@@ -394,8 +410,10 @@ mod tests {
                 mouse: &self.mouse,
                 gamepads: &self.gamepads,
                 pointers: &self.pointers,
+                virtual_input: &self.virtual_input,
             };
             self.state.update(&self.map, &inputs);
+            self.virtual_input.end_update();
         }
 
         /// Clears per-frame input, as `Last` does.
@@ -559,6 +577,34 @@ mod tests {
         let text = ron::to_string(&map).unwrap();
         let back: ActionMap = ron::from_str(&text).unwrap();
         assert_eq!(back, map);
+    }
+
+    #[test]
+    fn virtual_presses_count_like_bindings() {
+        let mut f = Fixture::new(jump_map());
+        f.virtual_input.press("jump");
+        f.update();
+        assert!(f.state.just_pressed("jump"));
+        assert_eq!(f.state.value("jump"), 1.0);
+        f.end_frame();
+        f.update();
+        assert!(f.state.pressed("jump") && !f.state.just_pressed("jump"));
+        f.virtual_input.release("jump");
+        f.update();
+        assert!(f.state.just_released("jump"));
+    }
+
+    #[test]
+    fn virtual_actions_need_no_binding_and_taps_last_one_update() {
+        let mut f = Fixture::new(ActionMap::new());
+        f.virtual_input.tap("pause");
+        f.update();
+        assert!(f.state.just_pressed("pause"));
+        f.update();
+        assert!(f.state.just_released("pause"));
+        f.update();
+        assert!(!f.state.pressed("pause") && !f.state.just_released("pause"));
+        assert_eq!(f.state.get_pressed().count(), 0);
     }
 
     #[test]

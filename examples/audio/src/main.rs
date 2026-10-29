@@ -50,8 +50,6 @@ const SKY: u32 = 0xdff6f5;
 const PLAYER_SIZE: Vec2 = Vec2::new(12.0, 18.0);
 /// Draw layer of the alien: above the map's three layers and the coins.
 const PLAYER_LAYER: i32 = 10;
-/// Draw layer of the volume panel, above everything but the screen fade.
-const HUD_LAYER: i32 = 1000;
 /// Units per second, and per second squared to get there.
 const RUN_SPEED: f32 = 120.0;
 const RUN_ACCEL: f32 = 900.0;
@@ -177,7 +175,7 @@ struct Bot {
     hold: u32,
 }
 
-/// The volume panel: the bus the keys change (0 is the master), and its sprites.
+/// The volume panel: the bus the keys change (0 is the master), and its UI nodes.
 #[derive(Resource, Default)]
 struct Panel {
     selected: usize,
@@ -187,12 +185,12 @@ struct Panel {
     light: Option<Entity>,
 }
 
-/// The panel's rows: master, then the buses, each with its colour.
-const ROWS: [(Option<Bus>, u32); 4] = [
-    (None, 0xf1faee),
-    (Some(Bus::Music), 0xc77dff),
-    (Some(Bus::Sfx), 0xffb703),
-    (Some(Bus::Ui), 0x4cc9f0),
+/// The panel's rows: master, then the buses, each with its colour and label.
+const ROWS: [(Option<Bus>, u32, &str); 4] = [
+    (None, 0xf1faee, "Master"),
+    (Some(Bus::Music), 0xc77dff, "Music"),
+    (Some(Bus::Sfx), 0xffb703, "Effects"),
+    (Some(Bus::Ui), 0x4cc9f0, "Menus"),
 ];
 
 fn main() {
@@ -359,44 +357,75 @@ fn setup(
     fade.set(1.0);
 }
 
-/// The volume panel, as children of the camera so it stays on screen: a row per bus with
-/// a marker, an icon and ten segments, and the speaker light.
-fn spawn_panel(
-    mut commands: Commands,
-    mut panel: ResMut<Panel>,
-    camera: Single<Entity, With<Camera2D>>,
-) {
-    let corner = vec2(-320.0 + 10.0, 180.0 - 10.0);
-    let sprite = |commands: &mut Commands, size: Vec2, at: Vec2| {
+/// The volume panel, in the UI's screen space at the top left (so camera shake does not
+/// move it): a row per bus with a marker, an icon, a label and ten segments, and the
+/// speaker light at the top right.
+fn spawn_panel(mut commands: Commands, mut panel: ResMut<Panel>) {
+    let root = commands
+        .spawn((
+            Name::new("volume panel"),
+            Node {
+                offset: vec2(6.0, 6.0),
+                padding: Edges::all(3.0),
+                layout: Layout::Column,
+                gap: 2.0,
+                ..default()
+            },
+            BackgroundColor(Color::hex(0x1d1f24).with_alpha(0.55)),
+        ))
+        .id();
+    let square = |commands: &mut Commands, parent: Entity, width: f32| {
         commands
             .spawn((
-                Sprite::solid(Color::WHITE, size),
-                Transform2D::from_translation(corner + at),
-                Layer(HUD_LAYER),
-                ChildOf(*camera),
+                Node::sized(width, 6.0),
+                BackgroundColor(Color::WHITE),
+                ChildOf(parent),
             ))
             .id()
     };
-    for row in 0..ROWS.len() {
-        let y = -(row as f32) * 9.0;
-        let marker = sprite(&mut commands, vec2(2.0, 6.0), vec2(0.0, y));
-        let icon = sprite(&mut commands, vec2(6.0, 6.0), vec2(6.0, y));
-        let segments = (0..10)
-            .map(|i| {
-                sprite(
-                    &mut commands,
-                    vec2(4.0, 6.0),
-                    vec2(14.0 + i as f32 * 5.0, y),
-                )
-            })
-            .collect();
+    for (_, hex, label) in ROWS {
+        let row = commands
+            .spawn((
+                Node {
+                    layout: Layout::Row,
+                    gap: 3.0,
+                    align: Align::Center,
+                    ..default()
+                },
+                ChildOf(root),
+            ))
+            .id();
+        let marker = square(&mut commands, row, 2.0);
+        let icon = square(&mut commands, row, 6.0);
+        commands.spawn((
+            Node::sized(38.0, 12.0),
+            Text::new(label).with_color(Color::hex(hex)),
+            ChildOf(row),
+        ));
+        let bar = commands
+            .spawn((
+                Node {
+                    layout: Layout::Row,
+                    gap: 1.0,
+                    ..default()
+                },
+                ChildOf(row),
+            ))
+            .id();
+        let segments = (0..10).map(|_| square(&mut commands, bar, 4.0)).collect();
         panel.rows.push((marker, icon, segments));
     }
-    panel.light = Some(sprite(
-        &mut commands,
-        vec2(6.0, 6.0),
-        vec2(640.0 - 20.0, 0.0),
-    ));
+    panel.light = Some(
+        commands
+            .spawn((
+                Name::new("speaker light"),
+                Node::sized(6.0, 6.0)
+                    .at(Anchor::TopRight)
+                    .with_offset(vec2(-10.0, 10.0)),
+                BackgroundColor(Color::WHITE),
+            ))
+            .id(),
+    );
 }
 
 fn enter_playing(
@@ -984,10 +1013,10 @@ fn update_panel(
     audio: Res<Audio>,
     settings: Res<AudioSettings>,
     panel: Res<Panel>,
-    mut sprites: Query<&mut Sprite>,
+    mut squares: Query<&mut BackgroundColor>,
 ) {
     for (row, (marker, icon, segments)) in panel.rows.iter().enumerate() {
-        let (bus, hex) = ROWS[row];
+        let (bus, hex, _) = ROWS[row];
         let level = bus.map_or(settings.master, |bus| settings.level(bus));
         let lit = (level * 10.0).round() as usize;
         let color = if settings.muted {
@@ -995,23 +1024,23 @@ fn update_panel(
         } else {
             Color::hex(hex)
         };
-        if let Ok(mut sprite) = sprites.get_mut(*marker) {
-            sprite.color = if row == panel.selected {
+        if let Ok(mut square) = squares.get_mut(*marker) {
+            square.0 = if row == panel.selected {
                 Color::WHITE
             } else {
                 Color::WHITE.with_alpha(0.0)
             };
         }
-        if let Ok(mut sprite) = sprites.get_mut(*icon) {
-            sprite.color = if settings.muted && bus.is_none() {
+        if let Ok(mut square) = squares.get_mut(*icon) {
+            square.0 = if settings.muted && bus.is_none() {
                 Color::hex(0xe63946)
             } else {
                 color
             };
         }
         for (i, segment) in segments.iter().enumerate() {
-            if let Ok(mut sprite) = sprites.get_mut(*segment) {
-                sprite.color = if i < lit {
+            if let Ok(mut square) = squares.get_mut(*segment) {
+                square.0 = if i < lit {
                     color
                 } else {
                     Color::hex(0x1d1f24).with_alpha(0.45)
@@ -1020,10 +1049,10 @@ fn update_panel(
         }
     }
     if let Some(light) = panel.light
-        && let Ok(mut sprite) = sprites.get_mut(light)
+        && let Ok(mut square) = squares.get_mut(light)
     {
         let blink = (time.raw_elapsed().as_secs_f32() * 3.0).fract() < 0.5;
-        sprite.color = match audio.status() {
+        square.0 = match audio.status() {
             AudioStatus::Running if settings.muted => Color::hex(0xe63946),
             AudioStatus::Running => Color::hex(0x06d6a0),
             AudioStatus::Waiting if blink => Color::hex(0xffd166),

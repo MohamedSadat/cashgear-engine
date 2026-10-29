@@ -271,6 +271,30 @@ impl QueuedSprite {
         let corner = -self.pivot * size;
         Some(Rect::from_corners(corner, corner + size))
     }
+
+    /// A sprite filling `rect` in screen space, for [`Sprites::push_screen`]: `texture`
+    /// (or its `source` part) stretched over the rectangle, upright, tinted by `color`.
+    /// Screen space runs y down, so the sprite's quad is mapped with y flipped.
+    pub fn screen_rect(
+        texture: AssetId<Image>,
+        source: Option<Rect>,
+        rect: Rect,
+        color: Color,
+        layer: i32,
+    ) -> Self {
+        Self {
+            texture,
+            size: Some(rect.size()),
+            source,
+            pivot: Vec2::ZERO,
+            color,
+            flip_x: false,
+            flip_y: false,
+            flash: Color::TRANSPARENT,
+            transform: Affine2::from_cols(Vec2::X, Vec2::NEG_Y, Vec2::new(rect.min.x, rect.max.y)),
+            layer,
+        }
+    }
 }
 
 /// The sprites to draw this frame, for immediate-mode drawing.
@@ -279,6 +303,12 @@ impl QueuedSprite {
 /// visible [`Sprite`] entities, draws everything, then empties the queue. The queue holds
 /// texture ids, not handles: keep the handles somewhere (a resource, say) for as long as
 /// you draw with them.
+///
+/// There are two queues. World sprites are drawn through the camera, sorted by layer then
+/// texture. Screen sprites ([`push_screen`](Self::push_screen)) are drawn after them, over
+/// the whole window at its own resolution, in [`ScreenSpace`](crate::ScreenSpace) units
+/// (the UI's pixels: origin at the view's top-left corner, y down), sorted by layer and
+/// otherwise in queue order. The UI and the screen fade draw there.
 ///
 /// ```
 /// use cg_core::prelude::*;
@@ -294,6 +324,7 @@ impl QueuedSprite {
 #[derive(Resource, Debug, Default)]
 pub struct Sprites {
     queue: Vec<QueuedSprite>,
+    screen: Vec<QueuedSprite>,
 }
 
 impl Sprites {
@@ -313,24 +344,35 @@ impl Sprites {
         self.queue.push(sprite);
     }
 
-    /// The sprites queued so far this frame.
+    /// Queues a sprite in screen space; see [`QueuedSprite::screen_rect`].
+    pub fn push_screen(&mut self, sprite: QueuedSprite) {
+        self.screen.push(sprite);
+    }
+
+    /// The world sprites queued so far this frame.
     pub fn queued(&self) -> &[QueuedSprite] {
         &self.queue
     }
 
-    /// The number of sprites queued so far this frame.
+    /// The screen sprites queued so far this frame.
+    pub fn screen_queued(&self) -> &[QueuedSprite] {
+        &self.screen
+    }
+
+    /// The number of world sprites queued so far this frame.
     pub fn len(&self) -> usize {
         self.queue.len()
     }
 
-    /// Whether nothing is queued.
+    /// Whether no world sprite is queued.
     pub fn is_empty(&self) -> bool {
         self.queue.is_empty()
     }
 
-    /// Drops everything queued. The renderer calls it after drawing.
+    /// Drops everything queued, in both queues. The renderer calls it after drawing.
     pub fn clear(&mut self) {
         self.queue.clear();
+        self.screen.clear();
     }
 }
 

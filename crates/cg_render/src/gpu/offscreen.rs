@@ -98,11 +98,12 @@ impl OffscreenRenderer {
             view,
             images,
             sprites: sprites.queued(),
+            screen_sprites: sprites.screen_queued(),
             shapes,
             scale_factor: 1.0,
         };
         self.painter
-            .render(&self.device, &self.queue, &target, size, &input);
+            .render(&self.device, &self.queue, &target, size, &input, None);
         self.read_back(&texture, size)
     }
 

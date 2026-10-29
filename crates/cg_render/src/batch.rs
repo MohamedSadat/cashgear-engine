@@ -39,27 +39,44 @@ pub(crate) struct Batcher {
     order: Vec<u32>,
     pub(crate) instances: Vec<SpriteInstance>,
     pub(crate) batches: Vec<Batch>,
+    /// The index of the first screen-space batch; world batches come before it.
+    pub(crate) screen_start: usize,
 }
 
 impl Batcher {
-    /// Sorts `sprites` by layer then texture (keeping queue order otherwise), builds their
-    /// instances and groups them into batches. Sprites with a missing texture or no area
+    /// Builds the instances and batches of a frame: the world sprites sorted by layer then
+    /// texture, then the screen sprites sorted by layer alone (keeping queue order
+    /// otherwise, which UI drawing depends on). Sprites with a missing texture or no area
     /// are skipped.
-    pub(crate) fn build(&mut self, sprites: &[QueuedSprite], images: &Assets<Image>) {
-        self.order.clear();
+    pub(crate) fn build(
+        &mut self,
+        world: &[QueuedSprite],
+        screen: &[QueuedSprite],
+        images: &Assets<Image>,
+    ) {
         self.instances.clear();
         self.batches.clear();
+        self.append(world, images, |queued| (queued.layer, queued.texture));
+        self.screen_start = self.batches.len();
+        self.append(screen, images, |queued| (queued.layer, AssetId::DEFAULT));
+    }
 
+    /// Appends the instances of `sprites` in the order of `key`, starting new batches.
+    fn append(
+        &mut self,
+        sprites: &[QueuedSprite],
+        images: &Assets<Image>,
+        key: impl Fn(&QueuedSprite) -> (i32, AssetId<Image>),
+    ) {
+        self.order.clear();
         self.order.extend(0..sprites.len() as u32);
-        let key = |&i: &u32| {
-            let queued = &sprites[i as usize];
-            (queued.layer, queued.texture)
-        };
+        let key = |&i: &u32| key(&sprites[i as usize]);
         // Queues are usually built in order already; skip the sort then.
         if !self.order.is_sorted_by_key(key) {
             self.order.sort_by_key(key);
         }
 
+        let first = self.batches.len();
         for &i in &self.order {
             let queued = &sprites[i as usize];
             let Some(instance) = instance(queued, images) else {
@@ -68,8 +85,11 @@ impl Batcher {
             let texture = queued.texture;
             let index = self.instances.len() as u32;
             self.instances.push(instance);
+            let extend = self.batches.len() > first;
             match self.batches.last_mut() {
-                Some(batch) if batch.texture == texture => batch.instances.end = index + 1,
+                Some(batch) if extend && batch.texture == texture => {
+                    batch.instances.end = index + 1;
+                }
                 _ => self.batches.push(Batch {
                     texture,
                     instances: index..index + 1,
@@ -81,6 +101,7 @@ impl Batcher {
 
 /// The GPU instance for one sprite: its local quad (pivot at the origin) mapped through
 /// its transform, which may rotate, scale, mirror or skew it.
+#[inline]
 fn instance(queued: &QueuedSprite, images: &Assets<Image>) -> Option<SpriteInstance> {
     let texture_size = texture_size(images, queued.texture)?.as_vec2();
     let (source, size) = queued.source_and_size(images)?;
@@ -153,7 +174,7 @@ mod tests {
         let (sa, sb) = (Sprite::new(a.clone()), Sprite::new(b.clone()));
         let sprites = [on(1, &sa), on(0, &sb), on(0, &sa), on(0, &sb), on(-1, &sb)];
         let mut batcher = Batcher::default();
-        batcher.build(&sprites, &images);
+        batcher.build(&sprites, &[], &images);
         let (a, b) = (a.id(), b.id());
         assert_eq!(
             batcher.batches,
@@ -179,6 +200,28 @@ mod tests {
     }
 
     #[test]
+    fn screen_sprites_keep_queue_order_within_a_layer_after_the_world() {
+        let (images, a, b) = images();
+        let rect = Rect::new(0.0, 0.0, 4.0, 4.0);
+        let screen = |texture: &Handle<Image>, layer| {
+            QueuedSprite::screen_rect(texture.id(), None, rect, Color::WHITE, layer)
+        };
+        let world = [on(0, &Sprite::new(a.clone()))];
+        let sprites = [screen(&a, 0), screen(&b, 0), screen(&a, 0), screen(&b, -1)];
+        let mut batcher = Batcher::default();
+        batcher.build(&world, &sprites, &images);
+        assert_eq!(batcher.screen_start, 1);
+        let textures: Vec<_> = batcher.batches.iter().map(|b| b.texture).collect();
+        // The world's batch of `a` is not extended by the first screen sprite.
+        assert_eq!(textures, [a.id(), b.id(), a.id(), b.id(), a.id()]);
+        // Screen sprites are upright: the quad's top edge samples the texture's top row.
+        let instance = &batcher.instances[2];
+        assert_eq!(instance.translation, [0.0, 4.0]);
+        assert_eq!(instance.y_axis, [0.0, -4.0]);
+        assert_eq!(instance.uv, [0.0, 1.0, 1.0, 0.0]);
+    }
+
+    #[test]
     fn skips_missing_textures_and_empty_sprites() {
         let (mut images, a, b) = images();
         images.remove(&b);
@@ -189,7 +232,7 @@ mod tests {
             on(0, &sa),
         ];
         let mut batcher = Batcher::default();
-        batcher.build(&sprites, &images);
+        batcher.build(&sprites, &[], &images);
         assert_eq!(batcher.instances.len(), 1);
         assert_eq!(batcher.batches.len(), 1);
     }
@@ -199,7 +242,7 @@ mod tests {
         let images = Assets::<Image>::default();
         let square = Sprite::solid(Color::RED, vec2(3.0, 3.0));
         let mut batcher = Batcher::default();
-        batcher.build(&[on(0, &square)], &images);
+        batcher.build(&[on(0, &square)], &[], &images);
         assert_eq!(batcher.batches[0].texture, AssetId::DEFAULT);
         assert_eq!(batcher.instances[0].x_axis, [3.0, 0.0]);
     }

@@ -1,0 +1,30 @@
+// English strings for the ui example. Keys are ids; `{name}` is filled in by the game.
+// Saving this file while the example runs updates the text at once.
+(
+    language: "en",
+    name: "English",
+    strings: {
+        "title": "CashGear",
+        "subtitle": "UI example",
+        "menu.play": "Play",
+        "menu.settings": "Settings",
+        "menu.language": "Language: {name}",
+        "menu.quit": "Quit",
+        "menu.hint": "Arrows or WASD to move, Enter to choose, Esc to go back. F12: debug overlay.",
+        "settings.title": "Settings",
+        "settings.volume": "Volume",
+        "settings.ui_sounds": "Menu sounds",
+        "settings.touch": "Touch controls: {mode}",
+        "settings.overlay": "Debug overlay: {state}",
+        "touch.auto": "Auto",
+        "touch.on": "On",
+        "touch.off": "Off",
+        "back": "Back",
+        "pause.title": "Paused",
+        "pause.resume": "Resume",
+        "pause.menu": "Main menu",
+        "hud.time": "Time",
+        "hud.energy": "Energy",
+        "play.hint": "Run and jump; running uses energy. Esc pauses.",
+    },
+)

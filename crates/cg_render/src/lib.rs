@@ -19,9 +19,10 @@
 //! | Resource | Holds |
 //! | --- | --- |
 //! | `Assets<Image>` | Images the renderer can draw, uploaded to the GPU when they appear or change |
-//! | [`Sprites`] | This frame's [`QueuedSprite`]s, sorted by layer then texture, one draw call per batch |
+//! | [`Sprites`] | This frame's [`QueuedSprite`]s, sorted by layer then texture, one draw call per batch; and screen-space sprites for the UI, drawn after them |
 //! | [`DebugShapes`] | This frame's lines, rectangles and circles, drawn on top |
 //! | [`RenderStats`] | Draw calls, sprites, culled sprites, frame time and the GPU in use |
+//! | [`RenderOverlays`] | Passes drawn over each frame, such as the egui debug overlay |
 //!
 //! Images are assets: `server.load("images/hero.png")` loads a PNG (with [`ImageLoader`]),
 //! and `server.load("atlases/items.atlas.ron")` a texture atlas packed by `cg_pack` (with
@@ -67,6 +68,7 @@ mod color;
 mod debug;
 mod gpu;
 mod image;
+mod overlay;
 mod queue;
 mod sprite;
 mod stats;
@@ -74,17 +76,19 @@ mod visibility;
 
 pub use atlas::{AtlasFile, AtlasLoader, AtlasRegion, AtlasSprite, AtlasSpriteData, TextureAtlas};
 pub use camera::{
-    Camera2D, CameraView, DEFAULT_VIRTUAL_RESOLUTION, MainCamera, ScalingMode, Viewport,
+    Camera2D, CameraView, DEFAULT_VIRTUAL_RESOLUTION, MainCamera, ScalingMode, ScreenSpace,
+    Viewport,
 };
 pub use color::Color;
 pub use debug::DebugShapes;
 pub use gpu::RenderError;
 pub use gpu::offscreen::OffscreenRenderer;
 pub use image::{Filter, Image, ImageError, ImageLoader};
+pub use overlay::{OverlayFrame, RenderOverlay, RenderOverlays};
 pub use queue::{FrameView, RenderSystems};
 pub use sprite::{Layer, QueuedSprite, Sprite, SpriteData, Sprites};
 pub use stats::RenderStats;
-pub use visibility::{InheritedVisibility, Visibility};
+pub use visibility::{InheritedVisibility, Visibility, VisibilitySystems};
 /// The `wgpu` crate the renderer is built on, for its configuration types.
 pub use wgpu;
 
@@ -166,7 +170,9 @@ impl Plugin for RenderPlugin {
                 PostUpdate,
                 (
                     atlas::apply_atlas_sprites,
-                    visibility::propagate_visibility.after(TransformSystems::Propagate),
+                    visibility::propagate_visibility
+                        .in_set(VisibilitySystems::Propagate)
+                        .after(TransformSystems::Propagate),
                 ),
             )
             .add_systems(
@@ -189,7 +195,7 @@ impl Plugin for RenderPlugin {
 pub mod prelude {
     pub use crate::{
         AtlasSprite, Camera2D, CameraView, Color, DebugShapes, Filter, Image, Layer, MainCamera,
-        QueuedSprite, RenderPlugin, RenderStats, ScalingMode, Sprite, Sprites, TextureAtlas,
-        Visibility,
+        QueuedSprite, RenderPlugin, RenderStats, ScalingMode, ScreenSpace, Sprite, Sprites,
+        TextureAtlas, Visibility,
     };
 }
