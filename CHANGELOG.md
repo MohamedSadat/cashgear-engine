@@ -3,6 +3,29 @@
 All notable changes to CashGear Engine are recorded here, one section per phase.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Phase 7 — Audio
+
+### Added
+
+- `cg_audio`: `Sound` assets from OGG Vorbis and WAV files (mono or stereo), decoded by symphonia. Sounds up to `AudioPlugin::stream_longer_than` seconds (10 by default) are decoded when they load; longer ones stay compressed and are streamed while they play, a quarter second per frame on the main thread into a two-second buffer, the same on every target and without threads. Loops are seamless: the decoder trims the encoder's delay and padding. `Sound::from_mono` and `from_stereo` make sounds in code.
+- `cg_audio`: the `Audio` resource. `play`, `play_at` and `play_with` start a `Voice` with `PlaySettings` (bus, volume, speed, random pitch jitter in semitones, looping, fade-in, a position or an entity to follow, distance falloff, a per-sound cap); `stop`, `pause`, `resume`, `set_volume`, `set_speed`, `set_position` and `stop_bus` change it, all with fades. `status` says whether sound is waiting, running, paused or off; `stats` counts voices, streams, underruns and sounds cut by the caps.
+- `cg_audio`: music with `play_music` (crossfading from the track playing; the same track again keeps playing) and `stop_music`.
+- `cg_audio`: buses. Music, effects and interface tracks under a master track in kira's mixer. `AudioSettings` holds a level per bus and the master (applied as loudness: amplitude is the level squared) and a mute switch; it is loaded from `Storage` at start-up and saved whenever it changes (`AudioPlugin::settings_key`).
+- `cg_audio`: voice caps. At most 32 effects and interface sounds at once and 4 copies of one sound (`AudioPlugin::max_voices`, `max_instances`, `PlaySettings::max_instances`); past them the oldest copy that does not loop is cut short with a 20 ms fade.
+- `cg_audio`: simple 2D positional audio. `Spatial` gives a full-volume radius, a smooth falloff to silence and a pan by horizontal offset; sounds are heard from the `AudioListener` entity, or else the active camera (before shake). `AudioEmitter` loops a sound from an entity while it has the component. Positioned one-shots out of earshot are skipped.
+- `cg_audio`: the audio device opens when the game first asks for a sound. On the web that waits for the user's first key press, click or touch; music and looping sounds asked for before then start then. Sound pauses while the app is suspended (Android) or the window hidden (a background tab, a minimized window; `AudioPlugin::pause_when_hidden`). `AudioOutput::Mock` runs without a device for tests; `--no-audio` (`AudioOutput::Off`) runs silent. A device that cannot be opened is logged once and the game runs silent.
+- `cg_platform`: `storage::Storage` for small text values kept between runs: one file per key in a per-user folder on desktop (`CG_SAVE_DIR` overrides it), `localStorage` on the web, and a stub on Android until Phase 11. `StorageBackend` lets games store elsewhere; `MemoryStorage` is for tests. `StoragePlugin` inserts it, with a `namespace` per game.
+- `cg_platform`: `Window::user_activated`, whether the user has interacted with the page (browsers' rule for starting sound), from `navigator.userActivation` where the browser has it.
+- `cg_platform`: the `LifecycleChanged` schedule, run at once when the app is suspended or resumed or the window hidden or shown, since no frame may follow (Android in the background, a hidden browser tab).
+- `examples/audio` (web page on port 8086): the alien's level with footsteps from animation events, jumps, landings as loud as the fall, a hit, coins that sound from where they are and rise a tone each in a run, a goal chime, a campfire and a fountain placed in Tiled (`Ambient` objects) that pan as you pass, music that crossfades between two Tiled `MusicZone`s, and a volume panel (1–4, -/=, M) saved between runs. The music and sounds are original, synthesized for the example. `--demo` lets a bot play; a test runs it with the mock device.
+- CI: `libasound2-dev` on Ubuntu, and `audio --demo`.
+
+### Changed
+
+- `DefaultPlugins` adds `StoragePlugin` (field `storage`) and `AudioPlugin` (field `audio`, flag `--no-audio`); the prelude includes the audio items, `Storage` and `StoragePlugin`.
+- The log filter hides symphonia's messages below warnings, on desktop and (through a small filtering logger in front of `console_log`) on the web.
+- New dependencies: kira 0.12.6 (only its cpal backend), symphonia 0.6.1 (OGG, Vorbis, WAV and PCM; MPL-2.0), rtrb 0.4.1.
+
 ## Phase 6 — Animation and effects
 
 ### Added

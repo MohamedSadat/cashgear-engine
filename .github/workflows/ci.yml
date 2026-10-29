@@ -34,12 +34,12 @@ jobs:
       - uses: actions/checkout@v7
       - name: Linux packages
         if: runner.os == 'Linux'
-        # libudev for gilrs; Xvfb and xkbcommon-x11 for the headless example runs; Mesa's
-        # lavapipe gives the GPU-less runner a software Vulkan device. Windows runners use
-        # Direct3D 12's WARP software adapter instead.
+        # libudev for gilrs; ALSA headers for cpal (audio); Xvfb and xkbcommon-x11 for the
+        # headless example runs; Mesa's lavapipe gives the GPU-less runner a software Vulkan
+        # device. Windows runners use Direct3D 12's WARP software adapter instead.
         run: >-
           sudo apt-get update && sudo apt-get install -y
-          libudev-dev libxkbcommon-x11-0 xvfb mesa-vulkan-drivers
+          libudev-dev libasound2-dev libxkbcommon-x11-0 xvfb mesa-vulkan-drivers
       - uses: actions-rust-lang/setup-rust-toolchain@v2
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
@@ -63,6 +63,9 @@ jobs:
           run cargo run -p collision -- --demo --physics-debug
           # The same for the animation bot, which also visits the particle gallery.
           run cargo run -p animation -- --demo
+          # The audio bot. A runner without a sound card cannot open the device; the game
+          # then runs silent, which this checks too.
+          run cargo run -p audio -- --demo
       - name: committed atlases are up to date
         run: >-
           cargo run -p cg_pack -- atlas examples/tiled_map/art/characters

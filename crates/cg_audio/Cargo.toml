@@ -8,5 +8,19 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[dependencies]
+bevy_ecs.workspace = true
+cg_assets.workspace = true
+cg_core.workspace = true
+cg_platform.workspace = true
+cg_render.workspace = true
+cg_world.workspace = true
+kira.workspace = true
+log.workspace = true
+ron.workspace = true
+rtrb.workspace = true
+serde.workspace = true
+symphonia.workspace = true
+
 [lints]
 workspace = true

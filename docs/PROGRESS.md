@@ -13,8 +13,8 @@ This file tracks phase status, the decisions made at the start of each phase, kn
 | 4 | Assets and tilemaps | Done | `phase-4` |
 | 5 | Collision and physics | Done | `phase-5` |
 | 6 | Animation and effects | Done | `phase-6` |
-| 7 | Audio | Next | |
-| 8 | Text and UI | Not started | |
+| 7 | Audio | Done | `phase-7` |
+| 8 | Text and UI | Next | |
 | 9 | Platformer sample game | Not started | |
 | 10 | Web build | Not started | |
 | 11 | Android build | Not started | |
@@ -395,6 +395,79 @@ Other choices made during the phase:
 - `cargo run -p tiled_map`: the enemies walk and flap as before, now through clips.
 - Web: `cd examples/animation && trunk serve --port 8085`, then open <http://127.0.0.1:8085> (and `?demo`, `?backend=gl`). With the tab in front, the gallery (P) should hold 60 fps.
 
+## Phase 7 — Audio
+
+### Decisions
+
+| Question | Answer |
+| --- | --- |
+| Audio formats | OGG Vorbis and WAV (16-bit or other PCM), mono or stereo. Only symphonia's `ogg`, `vorbis`, `wav` and `pcm` features are compiled, which keeps the wasm build small. |
+| Most sounds at once | 32 effect and interface voices, and 4 copies of one sound (`AudioPlugin::max_voices`, `max_instances`, and `PlaySettings::max_instances` per play). Past a cap the oldest copy that does not loop is cut short with a 20 ms fade; if every candidate loops, the new sound is skipped. Music is not counted. |
+| Settings menu | Not yet: keys now, a menu in Phase 9 with Phase 8's UI. The example draws the levels as bars (there is no text until Phase 8). The settings are saved through the new `Storage` and come back on the next run. |
+| Example sounds | Original, synthesized for the example by a scratch Python script (not in the repository) and encoded to OGG Vorbis with ffmpeg's libvorbis. |
+
+Chosen without asking (said with the questions):
+
+- **Streaming without threads.** kira's streaming sounds decode on a thread of their own and are not built for wasm at all. Music is streamed by our own decoder instead, which the main thread tops up every frame, the same on every target. `cg_audio` has no `cfg` and spawns no thread (portability rules 1 and 3).
+- **Storage** arrives in this phase, in `cg_platform` (portability rule 7).
+- **Positional audio** is the engine's own maths (pan and distance falloff from the camera), sent to kira as volume and panning; kira's 3D spatial tracks are more than a 2D game needs.
+- **Web unlock and the background:** the device opens on the first key press, click or touch; music and looping sounds asked for earlier start then, other sounds are skipped. Sound pauses while the app is suspended (Android) or the page hidden.
+- **The example** is the Phase 6 playground with sound, not a new level.
+
+Other choices made during the phase:
+
+- **What kira does.** kira (0.12.6, `default-features = false`, only its `cpal` backend) provides the device, the mixer and the bus tracks. Files are decoded by symphonia directly, not by kira's sound types. One kira `Sound` implementation (`VoiceSound`) plays both decoded frames and streams, resampling from the file's rate to the device's with kira's 4-point Hermite `interpolate_frame`. On desktop kira's cpal backend follows a change of the default output device by itself.
+- **Control without queues.** Each voice shares a few atomics with the audio callback: volume, panning and speed targets with a ramp time, and a play, pause or stop request with a fade. The callback reads them once per block and moves towards them frame by frame. Nothing is queued, so nothing can overflow when frames stop (a hidden tab). Fades follow an equal-power curve, so a crossfade keeps the loudness even.
+- **Streams.** A streamed voice decodes half a second before it starts, then at most a quarter second per frame into a two-second ring buffer (`rtrb`), which keeps up even at 4 frames a second. An empty buffer plays silence and counts an underrun (`AudioStats::underruns`). A looping stream opens its file again at the end. symphonia's decoder trims the encoder's delay and padding, so loops are sample-exact; a test compares two and a half loops of a stream with the decoded file. Sounds up to 10 seconds (`AudioPlugin::stream_longer_than`) are decoded at load, so they start at once and voices share them.
+- **Requests once a frame.** `Audio` is a plain resource. Calls queue commands, applied in `PostUpdate` after transform propagation (`AudioSystems::Update`), so positions are those of this frame. `Voice` ids are never reused; voices the engine starts itself (music, emitters) use ids with the top bit set.
+- **The device opens when first needed:** when the game asks for its first sound, so games and examples without sound never open one. If it cannot be opened (no sound card, as on CI runners), that is logged once and the game runs silent; `--no-audio` does the same on purpose. `AudioOutput::Mock` runs kira's mock backend for tests.
+- **Sounds still loading** start when they load. A one-shot that waited more than half a second is skipped, since a late coin sound is worse than none; music and loops wait. Unknown and failed sounds are logged and skipped.
+- **Music.** A crossfade fades the old voice out and the new one in over the same time, both on the music bus. Asking for the track already playing changes only its volume, so re-entering an area keeps the music going. A track that ends (not looping) clears `Audio::music`.
+- **Buses.** A master sub-track (so everything can pause at once) with music, effects and interface tracks under it. `AudioSettings` levels are loudness: amplitude is the level squared, so 0.5 is -12 dB and slider steps feel even. Settings are saved in `Last` when they change, under `audio-settings.ron` by default; loading them is not a change, so nothing is written at start-up.
+- **Positional defaults.** `Spatial { near: 96, far: 640, pan_width: 320, max_pan: 0.8 }` suits the 640×360 view: full volume within 96 units, a `(1 - t)²` falloff to silence at 640, and 0.8 of a full pan at the edge of the view. kira's panning keeps power even (a full pan is +3 dB on that side). Positions are updated every frame with a 50 ms ramp. Sounds are heard from the first `AudioListener`, else the active camera's transform (before shake, which moves only the drawn view), else the origin.
+- **The background.** The new `cg_platform::LifecycleChanged` schedule runs at once when the app is suspended or resumed or the window hidden or shown, because no frame may follow (Android in the background; a browser stops frames in a hidden tab). `cg_audio` pauses and resumes the master track there, with a 50 ms fade. `AudioPlugin::pause_when_hidden` (on by default) covers a background tab and a minimized desktop window.
+- **User activation on the web.** `Window::user_activated` follows `navigator.userActivation.hasBeenActive` where the browser has it (Chrome, Edge, Firefox 120+, Safari 16.4+), and the browser's own rule elsewhere: a key press other than Escape, a mouse press or the end of a touch. Script-made events do not count where the API exists, since they would not let the page start sound. The device opens in the frame after the gesture; Chromium allows that, because activation is sticky.
+- **Storage.** `Storage` is a cheap-to-clone resource over a `StorageBackend`: text values by key, synchronous, for small things (settings, save slots). Keys and namespaces are 1 to 64 ASCII letters, digits, `.`, `_` or `-` (not starting with `.`), so they are valid file names and `localStorage` keys everywhere. Desktop writes `<key>.tmp` and moves it over the old file, so a crash keeps the previous value. The default namespace is the executable's name on desktop and `game` elsewhere; games set their own.
+- **Logging.** symphonia logs two lines each time a stream opens or loops; the default filter now hides its messages below warnings. On the web a small logger in front of `console_log` applies the same filter.
+- **Versions.** kira 0.12.6 (cpal 0.18.2 with it), symphonia 0.6.1 (MPL-2.0; used unmodified, which the license allows in an MIT/Apache project), rtrb 0.4.1.
+- **Example assets.** `maps/level.tmx` is the Phase 6 playground with four objects added: two `Ambient` points and two `MusicZone` sensor rectangles. The art is copied from `examples/animation`. The scratch synth script made two chiptune loops (a 30 s meadow tune at 128 BPM and a 42 s calm one at 92 BPM; square, triangle and noise voices, mixed circularly so they loop without a seam) and nine effects. Together they are about 1 MB of OGG.
+
+### Done
+
+- `cg_audio`: `Sound`, `SoundLoader`, `DecodeError`; `Audio`, `Voice`, `PlaySettings`, `MusicSettings`, `AudioStatus`, `AudioStats`; `Bus`, `AudioSettings`; `Spatial`, `AudioListener`, `AudioEmitter`; `AudioOutput`, `AudioPlugin`, `AudioSystems` and a prelude.
+- `cg_platform`: `storage` (`Storage`, `StorageBackend`, `MemoryStorage`, `StorageError`, `StoragePlugin`), `Window::user_activated`, the `LifecycleChanged` schedule, and the quieter log filter on desktop and web.
+- `cashgear_engine`: `DefaultPlugins` adds `StoragePlugin` (field `storage`) and `AudioPlugin` (field `audio`, flag `--no-audio`); the prelude includes them.
+- `examples/audio` (new, with a trunk page on port 8086).
+- 345 tests (37 more than Phase 6): WAV decoding in mono and stereo, bad files, gapless OGG Vorbis, a stream looping sample-exactly, resampling, speed, fades, pause and stop in the callback, panning, one-shots finishing, both voice caps, positional pan and falloff from the camera and from a listener, emitters following, restarting and stopping, the music crossfade and repeat, stopping a bus, waiting for user activation, pausing while suspended, settings loaded from and saved to storage, files loaded through the asset server while a play waits, streams through the app, the silent output, pitch jitter, storage keys and the file and memory backends, and the example's bot with the mock device. The reference PNGs are unchanged.
+- CI: `libasound2-dev` on Ubuntu, and `audio --demo`.
+
+### Verified
+
+- All tests pass; fmt, clippy (desktop and wasm) and rustdoc with warnings denied are clean.
+- Desktop (Windows, GTX 1650, Vulkan, the default output device), `audio --demo`: the device opened with the first sound; the meadow tune crossfaded to the heights tune at the zone; both ambient loops played; the bot took 14 of 19 coins (best run 6) with 58 footsteps, 10 landings and a hit; 0 underruns at 60 fps; exit success. `hello_window`, `bunnymark`, `animation --demo` and `collision --demo` still run without warnings and never open an audio device. Release bunnymark at 10,000 sprites: about 730 fps (1.37 ms), level with Phase 6.
+- Web (`trunk serve`, the app's browser pane, debug wasm, WebGPU):
+  - before any input the status is `Waiting`, the speaker light blinks yellow and the music request is held;
+  - a real click opened Web Audio: music (streamed) and both ambient loops, 0 underruns, 60 fps, light green;
+  - the volume panel's keys changed the music level; the settings were saved in `localStorage` (`cashgear/cashgear-audio-example/audio-settings.ron`), a reload brought the level back, and M muted (master icon red);
+  - `?demo` after a click ran as on desktop: both zones, 0 underruns, no warnings or errors in the console, and no symphonia lines.
+- Not checked by me:
+  - **Listening.** I cannot hear. I checked the sound by numbers instead: peaks and loudness, loop seams, spectrograms of the music, decoded samples compared exactly, and underrun counters. The mix, the loudness of each effect and the music itself need your ears.
+  - Pausing in a hidden browser tab and on a minimized window: tested through the `LifecycleChanged` schedule, not seen happen.
+  - Firefox and Safari (their unlock rules), WebGL2, Android, and keyboard or gamepad play on desktop.
+  - The browser pane's own key presses did not reach the game (they seem to carry no physical key code); script-made `KeyboardEvent`s with a `code` did.
+
+### Manual checks for the user
+
+- Desktop: `cargo run -p audio`, and listen:
+  - the meadow tune starts at once; footsteps while running, each a little different; a blip on each jump; a thud on landing, louder after the cliff; a crunch on the spikes; coin chimes that rise a tone each in a quick run; a chime at the flag;
+  - the campfire near the start crackles and moves from the right ear to the left as you pass it, fading with distance; the fountain by the goal splashes;
+  - past the hill, at the planks, the music crossfades to the calm tune over 1.5 s; walking back crossfades back;
+  - the music loops (30 s and 42 s) and the campfire (4 s) should have no click or gap at the seam.
+- The volume panel at the top left: 1 to 4 pick master, music, effects or interface (white marker); - and = change it with a click on the interface bus; M mutes (master icon red). Quit and run again: the levels come back. The file is `%APPDATA%\CashGear\cashgear-audio-example\audio-settings.ron`.
+- Minimize the window: the sound pauses; restore it: it resumes.
+- `cargo run -p audio -- --demo` lets the bot play with sound. `--no-audio` runs silent (grey light).
+- Web: `cd examples/audio && trunk serve --port 8086`, open <http://127.0.0.1:8086>. The light blinks yellow until you click or press a key; then the music starts. Switch to another tab: the sound stops; come back: it resumes. Try Firefox and Safari if you have them.
+
 ## Known issues
 
 - On the web, `AppExit` stops the loop but leaves the page; there is nowhere to exit to.
@@ -430,6 +503,16 @@ Other choices made during the phase:
 - `Camera2D::zoom` is not interpolated, so a zoom changed in fixed steps would step on fast displays; zoom tweens therefore run every frame.
 - The Aseprite loader reads one image per sheet and ignores slices, layers and cel user data.
 
+- Streams are decoded on the main thread, two seconds ahead. A frame that takes longer than that (a very large asset loading on desktop) runs a stream dry for a moment of silence, counted in `AudioStats::underruns`.
+- With `pause_when_hidden` (the default) all sound pauses while the window is hidden, which on desktop includes a minimized window and, on some systems, one fully covered by others.
+- On the web, one-shot sounds asked for before the user's first input are skipped; music and looping sounds wait for it.
+- Positioned sounds pan by horizontal offset and fade by 2D distance from the camera's position before shake; there is no Doppler or occlusion, and positions update once a frame.
+- `Audio::is_playing` knows only voices started with `play`; music and emitters are the engine's (use `Audio::music`). An emitter skipped by the voice caps is not retried until its component changes.
+- `AudioEmitter` is not a prefab component yet; the example turns Tiled objects into emitters in game code.
+- Whether a sound is streamed depends only on its length (`stream_longer_than`); there are no per-file loader settings.
+- `Storage` is synchronous and meant for small values; on Android it stores nothing until Phase 11.
+- The example's volume panel is sprites parented to the camera, so camera shake moves the view under it; Phase 8's UI layer will draw such things in screen space.
+
 ## Notes for later phases
 
 - **Any phase:** `trunk` only watches the example folder, so touch the example after editing engine crates while `trunk serve` runs.
@@ -440,16 +523,21 @@ Other choices made during the phase:
 - **Phase 8:** egui will need its own pass after the debug shapes. `Painter::render` is the place to add it.
 - **Phase 10:** measure a release wasm build (`trunk build --release`, `wasm-opt`). The debug wasm is about 10 MB.
 - **Phase 8:** on-screen buttons can press actions through a new `Binding` variant or by driving `ScreenRegion` touches.
-- **Phase 7:** `kira` (via `cpal`) needs `libasound2-dev` on Ubuntu CI. Sounds should be assets (`Handle<Sound>` with an OGG/WAV loader) through the asset server.
 - **Phase 9:** the Kenney Pixel Platformer sheets and license are in `examples/tiled_map/assets`; the scratch generator that built the level is not in the repository, so new levels are made in Tiled.
 - **Phase 11:** add `aarch64-linux-android` to `rust-toolchain.toml` targets and a CI job. Fill in the Android branch of `cg_platform::io` (APK assets through `android-activity`'s asset manager); file watching stays desktop-only.
 - **Phase 12:** `cg_script` will not build for wasm; keep it out of `check-wasm` or behind the `script` feature.
 
-- **Phase 7:** footstep and landing sounds can hang off `AnimationEvent`s (read them in `FixedUpdate`) and `just_landed`; camera shake moves only the drawn view (`FrameView`), so take the listener position from the camera's transform.
 - **Phase 8:** tweens know only transforms, sprites and camera zoom; UI widgets will need their own tween properties (or a generic lens). `ScreenFade` is a sprite on layer `i32::MAX`, so UI drawn in its own pass after the sprites shows over the fade; decide whether menus fade with the game.
 - **Phase 9:** reuse `examples/animation`'s controller, `alien.anim.ron`, dust prefab and hit flash for the player, `StateFade` for menu and level changes, and Tiled tile animations for coins, water and flags in the platformer's tileset. Enemies can each have an `Animator`.
 - **Phase 10:** measure the particle gallery in a release wasm build with the tab in front, on WebGPU and WebGL2.
 - **Phase 13:** an animation preview (clips of a sheet, a graph's states) would suit the editor; clip events and particle settings are plain data already.
+
+- **Phase 8:** interface sounds belong on `Bus::Ui`. A settings screen edits `AudioSettings` (levels 0 to 1, `step_level`, `muted`); it saves itself. Move the audio example's volume panel into the UI layer.
+- **Phase 9:** reuse `examples/audio`: footsteps from animation events, landing volume from the fall, coin runs, `Ambient` and `MusicZone` objects in Tiled, and `play_music` per level (the same track keeps playing across a restart). Build the settings menu on `AudioSettings`. Set `StoragePlugin::namespace` to the game's id; save games go through `Storage` too.
+- **Phase 10:** measure what kira, cpal and symphonia add to a release wasm build. cpal's Web Audio backend runs its callback on the browser's main thread; check for crackles under load, and consider cpal's AudioWorklet support (it needs shared memory, so COOP/COEP headers) if there are.
+- **Phase 11:** test cpal's Android output (AAudio) and pausing through `LifecycleChanged` on a device, with headphones and a phone call. Fill in `Storage` for Android (the app's internal data folder).
+- **Phase 12:** Lua bindings for `Audio` (play, music, settings).
+- **Phase 14:** decode streams on a worker thread on desktop, with the asset loads.
 
 ## Backlog
 
@@ -470,3 +558,8 @@ Features that came up but don't serve the platformer or a listed example go here
 - GPU particles, or instanced particle buffers, if the CPU particles ever become the bottleneck.
 - Aseprite slices (per-frame pivots and hitboxes) and multi-layer exports.
 - Camera look-ahead in the direction of travel.
+- Audio effects through kira's track effects: reverb, a low-pass for pause menus or underwater, ducking music under dialogue.
+- Doppler, occlusion, and listener orientation; beat-synced events with kira's clocks.
+- Seeking and loop regions in streams; audio sprites (several sounds in one file); per-file loader settings (force streaming).
+- MP3 and FLAC (symphonia features), if a game needs them.
+- `AudioEmitter` as a prefab component, for emitters set up in prefabs and Tiled properties.

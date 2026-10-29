@@ -33,7 +33,7 @@ console_log.workspace = true
 js-sys.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
-web-sys = { workspace = true, features = ["Document", "Element", "Headers", "HtmlCanvasElement", "HtmlElement", "Location", "Response", "Window"] }
+web-sys = { workspace = true, features = ["Document", "Element", "Headers", "HtmlCanvasElement", "HtmlElement", "Location", "Response", "Storage", "Window"] }
 
 [dev-dependencies]
 ron.workspace = true

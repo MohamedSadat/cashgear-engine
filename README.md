@@ -2,7 +2,7 @@
 
 CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WASM) and Android, built with `winit`, `wgpu` and `bevy_ecs`. A sample platformer (`games/platformer`) proves it. The engine is built in 15 phases; see [docs/PLAN.md](docs/PLAN.md) for the plan and [docs/PROGRESS.md](docs/PROGRESS.md) for where it stands.
 
-> **Status:** Phase 6. `cg_core` (app, plugins, fixed-timestep loop, `Time`, schedules), `cg_platform` (window, input, actions, lifecycle, logging, asset IO), `cg_render` (`wgpu` sprites with hit flashes, camera, virtual resolutions, debug shapes, culling, image and atlas assets), `cg_world` (transforms and hierarchy, interpolation, a game-state stack, RON prefabs), `cg_assets` (handles, background loading, loading states, hot reload), `cg_tiled` (Tiled maps with parallax, chunked tiles, tile animations and object prefabs), `cg_physics` (kinematic bodies with slopes and one-way platforms, tile and entity colliders, sensors, layers, raycasts) and `cg_anim` (Aseprite sprite sheets, animation state machines and events, tweens, CPU particles, camera follow, shake and fades) work on desktop and web. Audio arrives in Phase 7.
+> **Status:** Phase 7. `cg_core` (app, plugins, fixed-timestep loop, `Time`, schedules), `cg_platform` (window, input, actions, lifecycle, logging, asset IO, save storage), `cg_render` (`wgpu` sprites with hit flashes, camera, virtual resolutions, debug shapes, culling, image and atlas assets), `cg_world` (transforms and hierarchy, interpolation, a game-state stack, RON prefabs), `cg_assets` (handles, background loading, loading states, hot reload), `cg_tiled` (Tiled maps with parallax, chunked tiles, tile animations and object prefabs), `cg_physics` (kinematic bodies with slopes and one-way platforms, tile and entity colliders, sensors, layers, raycasts) and `cg_anim` (Aseprite sprite sheets, animation state machines and events, tweens, CPU particles, camera follow, shake and fades) and `cg_audio` (OGG and WAV sounds, streamed music with crossfades, buses with saved volume settings, positional sound) work on desktop and web. Text and UI arrive in Phase 8.
 
 ## Workspace layout
 
@@ -17,7 +17,7 @@ CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WAS
 | `crates/cg_tiled` | Tiled maps, chunked tile rendering, object spawning | 4 |
 | `crates/cg_physics` | AABB/tile collision, layers, sensors, raycasts | 5 |
 | `crates/cg_anim` | Sprite animation, state machines, tweens, particles, camera effects | 6 |
-| `crates/cg_audio` | `kira` wrapper, buses, positional pan | 7 |
+| `crates/cg_audio` | `kira` mixer, sounds and streamed music, buses, positional pan | 7 |
 | `crates/cg_ui` | Text, game UI, touch controls, `egui` debug overlay | 8 |
 | `crates/cg_script` | Lua runtime and bindings (facade feature `script`) | 12 |
 | `games/platformer` | Sample game | 9 |
@@ -37,6 +37,7 @@ Each example is its own binary crate under `examples/`, with an `index.html` for
 | `tiled_map` | A Tiled level with Kenney art: a loading bar, parallax, chunked tiles, object prefabs, an atlas packed by `cg_pack`, and live editing |
 | `collision` | A box runs a Tiled test course: 45° and 22.5° slopes, one-way platforms, spikes, crates, coin sensors, a dash and a slam that pass through nothing; F1 draws the colliders, `--demo` lets a bot run it |
 | `animation` | Kenney's alien from an Aseprite sheet, run by a state machine: footstep dust, squash and stretch, hit flashes, spinning coins, a waving Tiled flag, a camera that follows, shakes and zooms, and a fade into a gallery of 10,000 particles; `--demo` lets a bot play |
+| `audio` | The alien's level with sound: footsteps, jumps and landings, coins rising in pitch, a campfire and a fountain that pan as you pass, music that crossfades between two areas, and a volume panel saved between runs; `--demo` lets a bot play |
 
 ```sh
 cargo run -p hello_window                  # desktop
@@ -46,6 +47,7 @@ cargo run -p ecs_sprites                   # add -- --demo to cycle the states b
 cargo run -p tiled_map                     # edit examples/tiled_map/assets/maps/level.tmx in Tiled while it runs
 cargo run -p collision                     # add -- --demo for the bot, --physics-debug to draw colliders
 cargo run -p animation                     # Z zooms, P opens the particle gallery; -- --demo for the bot
+cargo run -p audio                         # 1-4 pick a bus, -/= change it, M mutes; -- --demo for the bot
 
 cargo install trunk --locked               # once
 cd examples/hello_window && trunk serve    # web: open http://127.0.0.1:8080
@@ -54,15 +56,18 @@ cd examples/ecs_sprites && trunk serve --port 8082
 cd examples/tiled_map && trunk serve --port 8083
 cd examples/collision && trunk serve --port 8084
 cd examples/animation && trunk serve --port 8085
+cd examples/audio && trunk serve --port 8086       # sound starts after a key press or click
 ```
 
-Every example takes `--frames N`, `--no-vsync` and `--backend <vulkan|dx12|metal|gl|webgpu>`; on the web they go in the page URL as `?frames=N&no-vsync&backend=gl`. The asset flags are `--hot-reload` / `--no-hot-reload` (on by default in debug desktop builds), `--asset-root <path>` and `--asset-delay <seconds>` (slows loading down to try loading screens). `--physics-debug` starts with colliders drawn (F1 toggles them).
+Every example takes `--frames N`, `--no-vsync` and `--backend <vulkan|dx12|metal|gl|webgpu>`; on the web they go in the page URL as `?frames=N&no-vsync&backend=gl`. The asset flags are `--hot-reload` / `--no-hot-reload` (on by default in debug desktop builds), `--asset-root <path>` and `--asset-delay <seconds>` (slows loading down to try loading screens). `--physics-debug` starts with colliders drawn (F1 toggles them), and `--no-audio` turns the sound off.
 
 ### Assets
 
 A game's files live in its own `assets/` folder and are loaded by path: `server.load("maps/level1.tmx")`. Under `cargo run` that folder is found through `CARGO_MANIFEST_DIR`; a shipped executable looks for `assets` next to itself, and `CG_ASSET_ROOT` overrides both. On the web, `trunk` copies the folder next to `index.html` (`<link data-trunk rel="copy-dir" href="assets" />`) and the engine fetches from there.
 
 Sprite animations come from Aseprite: export a sprite sheet with its JSON data ("Hash" or "Array", with tags) next to the image and load the `.json` as a `SpriteSheet`; each tag becomes a clip, and a tag's user data can carry events (`0:footstep, 3:footstep`). Animation state machines are `.anim.ron` files. Both hot-reload like any asset.
+
+Sounds are OGG Vorbis or WAV files, mono or stereo, loaded as `Sound` assets. Files up to 10 seconds are decoded when they load; longer ones (music) stay compressed and are streamed while they play.
 
 Texture atlases are packed ahead of time and committed:
 

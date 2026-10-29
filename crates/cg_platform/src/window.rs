@@ -1,6 +1,7 @@
 //! The game window, its lifecycle messages and the plugin that runs the frame loop.
 
 use cg_core::ecs::prelude::*;
+use cg_core::ecs::schedule::ScheduleLabel;
 use cg_core::glam::{UVec2, Vec2};
 use cg_core::{App, Plugin};
 use std::sync::Arc;
@@ -48,6 +49,7 @@ pub struct Window {
     pub(crate) focused: bool,
     pub(crate) occluded: bool,
     pub(crate) suspended: bool,
+    pub(crate) user_activated: bool,
 }
 
 impl Default for Window {
@@ -58,6 +60,7 @@ impl Default for Window {
             focused: false,
             occluded: false,
             suspended: true,
+            user_activated: false,
         }
     }
 }
@@ -72,6 +75,7 @@ impl Window {
             focused: true,
             occluded: false,
             suspended: false,
+            user_activated: true,
         }
     }
 
@@ -103,6 +107,13 @@ impl Window {
     /// Whether the app is suspended (Android background). No frames run while suspended.
     pub fn suspended(&self) -> bool {
         self.suspended
+    }
+
+    /// Whether the user has pressed a key, clicked or touched the app yet. Browsers start
+    /// sound only after that (their autoplay rules), so the audio waits for it. Always true
+    /// on desktop and Android.
+    pub fn user_activated(&self) -> bool {
+        self.user_activated
     }
 }
 
@@ -148,6 +159,17 @@ pub enum Lifecycle {
         scale_factor: f64,
     },
 }
+
+/// A schedule the runner runs at once when the app is suspended or resumed, or the window
+/// is hidden or shown, after updating [`Window`] and writing the [`Lifecycle`] message.
+///
+/// It exists because no frame may follow: an Android app in the background and a hidden
+/// browser tab stop getting frames, so a system in [`Update`](cg_core::Update) would only
+/// see the change once the app is back. Keep its systems short: pause the audio, save the
+/// game. Read the state from [`Window`] (`suspended`, `occluded`), not from `Lifecycle`
+/// messages, which the next frame's systems read too.
+#[derive(ScheduleLabel, Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LifecycleChanged;
 
 /// Opens the window and makes it drive the app's frames on desktop and web.
 ///

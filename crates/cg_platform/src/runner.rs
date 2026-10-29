@@ -12,7 +12,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use crate::input::{ButtonInput, KeyCode, MouseButton, PointerId, Pointers};
-use crate::window::{Lifecycle, Window, WindowConfig, WindowHandle};
+use crate::window::{Lifecycle, LifecycleChanged, Window, WindowConfig, WindowHandle};
 use cg_core::ecs::change_detection::Mut;
 use cg_core::glam::{UVec2, Vec2};
 use cg_core::{App, AppExit};
@@ -117,6 +117,12 @@ impl Runner {
         self.app.world_mut().write_message(message);
     }
 
+    /// Runs [`LifecycleChanged`] now, since no frame may follow a suspend or a hidden tab.
+    fn lifecycle_changed(&mut self) {
+        // Apps without systems in the schedule do not have it.
+        let _ = self.app.world_mut().try_run_schedule(LifecycleChanged);
+    }
+
     fn exit(&mut self, event_loop: &ActiveEventLoop, exit: AppExit) {
         self.exit = Some(exit);
         event_loop.exit();
@@ -126,6 +132,11 @@ impl Runner {
     fn frame(&mut self, event_loop: &ActiveEventLoop) {
         if self.suspended {
             return;
+        }
+        if !self.app.world().resource::<Window>().user_activated
+            && platform_user_activation() == Some(true)
+        {
+            self.user_activated();
         }
         let now = Instant::now();
         let delta = self
@@ -148,7 +159,32 @@ impl Runner {
         (logical, window.logical_size())
     }
 
+    /// Records the first user input that browsers count as activation (see
+    /// [`Window::user_activated`]).
+    fn user_activated(&mut self) {
+        if !self.app.world().resource::<Window>().user_activated {
+            log::debug!("user activation: audio may start");
+            self.window_mut().user_activated = true;
+        }
+    }
+
     fn on_input(&mut self, event: WindowEvent) {
+        // The inputs browsers count as user activation: a key press other than Escape, a
+        // mouse button press, and the end of a touch.
+        let activates = match &event {
+            WindowEvent::KeyboardInput { event, .. } => {
+                event.state == ElementState::Pressed
+                    && event.physical_key != PhysicalKey::Code(KeyCode::Escape)
+            }
+            WindowEvent::MouseInput { state, .. } => *state == ElementState::Pressed,
+            WindowEvent::Touch(touch) => touch.phase == TouchPhase::Ended,
+            _ => false,
+        };
+        // Where the browser keeps its own record, trust that instead: synthetic events
+        // (from scripts) look like input here but do not let a page start sound.
+        if activates && platform_user_activation().is_none() {
+            self.user_activated();
+        }
         match event {
             WindowEvent::KeyboardInput { event, .. } => {
                 let PhysicalKey::Code(key) = event.physical_key else {
@@ -253,6 +289,8 @@ impl ApplicationHandler for Runner {
             state.physical_size = size;
             state.scale_factor = scale_factor;
             state.focused = focused;
+            // Only browsers hold sound back until the user has interacted.
+            state.user_activated = !cfg!(target_arch = "wasm32");
             self.app
                 .world_mut()
                 .insert_resource(WindowHandle(window.clone()));
@@ -262,6 +300,7 @@ impl ApplicationHandler for Runner {
         self.last_frame = None;
         self.window_mut().suspended = false;
         self.lifecycle(Lifecycle::Resumed);
+        self.lifecycle_changed();
         if let Some(window) = &self.window {
             window.request_redraw();
         }
@@ -271,6 +310,7 @@ impl ApplicationHandler for Runner {
         self.suspended = true;
         self.window_mut().suspended = true;
         self.lifecycle(Lifecycle::Suspended);
+        self.lifecycle_changed();
     }
 
     fn window_event(
@@ -318,6 +358,7 @@ impl ApplicationHandler for Runner {
             WindowEvent::Occluded(occluded) => {
                 self.window_mut().occluded = occluded;
                 self.lifecycle(Lifecycle::Occluded(occluded));
+                self.lifecycle_changed();
             }
             other => self.on_input(other),
         }
@@ -390,6 +431,30 @@ fn platform_window_created(_window: &WinitWindow) -> Option<UVec2> {
 /// Per-platform work when the window's size in physical pixels changes.
 #[cfg(not(target_arch = "wasm32"))]
 fn platform_resized(_window: &WinitWindow, _size: UVec2) {}
+
+/// The platform's own record of user activation, if it keeps one. Desktop has none (and
+/// needs none: the window starts activated).
+#[cfg(not(target_arch = "wasm32"))]
+fn platform_user_activation() -> Option<bool> {
+    None
+}
+
+/// `navigator.userActivation.hasBeenActive`, where the browser has it (Chrome, Edge,
+/// Firefox 120+, Safari 16.4+).
+#[cfg(target_arch = "wasm32")]
+fn platform_user_activation() -> Option<bool> {
+    use js_sys::Reflect;
+    use wasm_bindgen::JsValue;
+
+    let window = web_sys::window()?;
+    let navigator = Reflect::get(&window, &JsValue::from_str("navigator")).ok()?;
+    let activation = Reflect::get(&navigator, &JsValue::from_str("userActivation"))
+        .ok()
+        .filter(JsValue::is_object)?;
+    Reflect::get(&activation, &JsValue::from_str("hasBeenActive"))
+        .ok()?
+        .as_bool()
+}
 
 #[cfg(target_arch = "wasm32")]
 fn platform_resized(window: &WinitWindow, size: UVec2) {
