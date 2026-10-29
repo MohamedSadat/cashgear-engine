@@ -90,6 +90,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Linux packages
+        # The bundle hook runs cg_pack, which builds the engine natively: libudev for
+        # gilrs, ALSA headers for cpal.
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev
       - uses: actions-rust-lang/setup-rust-toolchain@v2
       - uses: taiki-e/install-action@v2
         with:
