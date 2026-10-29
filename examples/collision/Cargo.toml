@@ -1,0 +1,15 @@
+[package]
+name = "collision"
+description = "CashGear Engine example: a box runs a Tiled test course with slopes, one-way platforms, hazards, sensors and fast moves."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cashgear_engine.workspace = true
+
+[lints]
+workspace = true

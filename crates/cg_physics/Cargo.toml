@@ -8,5 +8,17 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[dependencies]
+# Direct dependency so bevy's derive macros (`Component`, `Message`) can find `bevy_ecs`.
+bevy_ecs.workspace = true
+cg_assets.workspace = true
+cg_core.workspace = true
+cg_platform.workspace = true
+cg_render.workspace = true
+cg_tiled.workspace = true
+cg_world.workspace = true
+log.workspace = true
+serde.workspace = true
+
 [lints]
 workspace = true

@@ -593,6 +593,17 @@ dependencies = [
 [[package]]
 name = "cg_physics"
 version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "cg_assets",
+ "cg_core",
+ "cg_platform",
+ "cg_render",
+ "cg_tiled",
+ "cg_world",
+ "log",
+ "serde",
+]
 
 [[package]]
 name = "cg_platform"
@@ -681,6 +692,13 @@ dependencies = [
  "serde",
  "termcolor",
  "unicode-width",
+]
+
+[[package]]
+name = "collision"
+version = "0.1.0"
+dependencies = [
+ "cashgear_engine",
 ]
 
 [[package]]

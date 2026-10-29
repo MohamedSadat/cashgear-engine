@@ -59,6 +59,8 @@ jobs:
           run cargo run -p bunnymark -- --frames 120 --ecs
           run cargo run -p ecs_sprites -- --frames 480 --demo
           run cargo run -p tiled_map -- --frames 360 --demo
+          # No frame limit: the bot exits by itself, with an error if it fails the course.
+          run cargo run -p collision -- --demo --physics-debug
       - name: committed atlases are up to date
         run: >-
           cargo run -p cg_pack -- atlas examples/tiled_map/art/characters

@@ -11,8 +11,8 @@ This file tracks phase status, the decisions made at the start of each phase, kn
 | 2 | Renderer core | Done | `phase-2` |
 | 3 | ECS and scenes | Done | `phase-3` |
 | 4 | Assets and tilemaps | Done | `phase-4` |
-| 5 | Collision and physics | Next | |
-| 6 | Animation and effects | Not started | |
+| 5 | Collision and physics | Done | `phase-5` |
+| 6 | Animation and effects | Next | |
 | 7 | Audio | Not started | |
 | 8 | Text and UI | Not started | |
 | 9 | Platformer sample game | Not started | |
@@ -269,6 +269,61 @@ Other choices made during the phase:
 - `cargo run -p ecs_sprites`: the same game as in Phase 3, now loading its prefabs and images from `assets/`. Editing `examples/ecs_sprites/assets/prefabs/bunny.prefab.ron` (the hat colour, say) while it runs changes the bunnies spawned after the save.
 - Web: `cd examples/tiled_map && trunk serve --port 8083`, then open <http://127.0.0.1:8083> (and `?backend=gl`, `?asset-delay=2`).
 
+## Phase 5 — Collision and physics
+
+### Decisions
+
+| Question | Answer |
+| --- | --- |
+| Slopes in v1 | Yes: 45° and 22.5°, and in fact any surface from a left height to a right height. Kenney's Pixel Platformer has no slope tiles, so the example's `slopes.png` is made from Kenney's grass and dirt tiles, sheared column by column (five tiles: a 45° slope and the cell under it, the two halves of a 22.5° slope and the cell under the lower half). Slopes going down are the same tiles flipped horizontally in Tiled. |
+| Units | Pixels: one world unit is one Tiled pixel, as the renderer and `cg_tiled` already use. Speeds are pixels per second; the default gravity is 980 down. |
+| `rapier2d` | Later, in the backlog. The platformer needs no dynamic bodies. |
+| Character controller | The engine gives a `KinematicBody` with contacts; the example writes its own short controller, and Phase 9 builds the platformer's (coyote time, jump buffer) in the game. |
+
+Chosen without asking (said at the start of the phase):
+
+- **Which layers collide.** Tile layers with a `collision` property set to `true`. Otherwise the parallax cloud layer in `tiled_map`, which uses the `one_way` cloud tiles, would collide.
+- **The example's level** is its own test course, not `tiled_map`'s level.
+- **Debug drawing** toggles with F1 (`PhysicsPlugin::debug_key`); `--physics-debug` starts with it on.
+
+Other choices made during the phase:
+
+- **Schedule.** The physics runs in `FixedPostUpdate` after `TransformSystems::Propagate`, in three chained sets: `Prepare` (snapshot every collider into `PhysicsWorld` and rebuild the spatial hash), `Move` (kinematic bodies) and `Detect` (overlap messages). Game code sets velocities in `FixedUpdate`; contacts and messages are ready in the next `FixedUpdate`. Reading `GlobalTransform2D` after propagation means bodies and colliders moved in `FixedUpdate` are seen where they are now. A body's `Transform2D` moves by the same amount in its parent's space, and its `GlobalTransform2D` translation is updated too, so `Detect` and later systems see the new position.
+- **Movement.** Gravity, then a move along x, then along y (or onto the floor), each swept over the whole distance against tiles and static colliders. Long moves are cut into sub-steps of at most 8 units (at most 32 per step), so ground following sees every part of a slope; sweeps keep even the longest sub-step from passing anything. Hitting something zeroes the velocity in that direction. A floor that would lift the body into a ceiling turns into a wall.
+- **Slopes carry the foot.** A body stands on a slope with the middle of its bottom edge on the surface, as platformer characters do; its corners hang over or into the hill. While the foot is over a slope, only the foot's column decides the floor, so a body walks down a slope instead of hanging off the plateau at its top. Slopes block only from above (bodies pass them from below and from the sides, like one-way platforms). Near a slope, a grounded body may run its lower corner into terrain as high as the slope rises under half its width plus the move, which lets it reach the plateau at the top of a slope. Bodies wider than twice a slope's run climb narrow slopes by their corner instead.
+- **Bodies are boxes.** Kinematic bodies move as the bounding box of their collider, and treat every collider they hit as its bounding box. Rectangles stay axis-aligned: an entity's rotation moves a collider's offset but does not turn it.
+- **Static colliders** are entities with a `Collider` and no `Sensor` or `KinematicBody`. They block bodies but are not moved by the physics; a crate moved by code does not push bodies.
+- **Overlaps.** Every pair of interacting colliders that share area is reported, except two static ones; touching is not overlapping, so a body resting on a crate does not overlap it. A body that moved is tested against sensors and other bodies by the box covering its whole move, so the dash in the example collects every coin it passes. Pairs are ordered by entity index: bevy's own `Entity` ordering (and `to_bits`) runs backwards over the index, so `Pair` orders by `index_u32` and generation.
+- **Tiled.** Tile properties `solid`, `one_way`, `slope_left` and `slope_right` (pixels from the tile's bottom) and `hazard`. Where collision layers overlap, the topmost layer's shape wins and a hazard on any of them counts. Flipped-vertically or diagonal slope tiles collide as solid blocks, with a warning. Layer offsets and parallax are ignored for collision, with a warning. Objects with a `collider` or `sensor` property get a collider of their shape (round ellipses become circles, other shapes their bounding box; points have no area). `Collider`, `Sensor`, `KinematicBody` and `CollisionLayers` are prefab components, so prefabs and Tiled properties can set them too. The grid is rebuilt when the map changes (tested through `AssetServer::reload`).
+- **Hazards** cover the whole cell (overlap, or touching a solid hazard). Tiled's per-tile collision shapes are not read; see the backlog.
+- **Queries.** `SpatialQuery` reads the `PhysicsWorld` snapshot and only `TileCollider`s, so it can sit next to queries that move entities. Rays hit solids from any side and one-way platforms and slopes only from above, the way they block bodies.
+- **API.** `KinematicBody` requires `Interpolated` (bodies move in fixed steps). `drop_through` is a public field: a private field would stop games from writing `KinematicBody { max_fall_speed: 420.0, ..default() }`.
+- **Touching.** Distances up to 0.01 units count as touching (`EPSILON`).
+- **Example bot.** The bot fills the same per-step `Intent` the controls do, inside `FixedUpdate`, so its run depends only on the number of fixed steps, never on the frame rate. A test runs it without a window; CI runs `collision --demo --physics-debug` with no frame limit, since the demo exits by itself (with an error if the bot restarts or runs out of time).
+
+### Done
+
+- `cg_physics`: `Collider`, `ColliderShape`, `Sensor`, `WorldShape`; `KinematicBody`, `KinematicContacts`, `Contact`, `Gravity`; `TileGrid`, `TileCell`, `TileShape`, `TileCollider` and `TileGrid::from_tiled_map`; `CollisionLayers`; `CollisionStarted`, `CollisionEnded`, `Overlaps`; `PhysicsWorld`, `SpatialQuery`, `QueryFilter`, `RayHit`, `TileHit`; `PhysicsDebug`; `PhysicsPlugin`, `PhysicsSystems` and a prelude.
+- `cashgear_engine`: `DefaultPlugins` adds `PhysicsPlugin` (field `physics`, flag `--physics-debug`); the prelude includes the physics.
+- `examples/collision` (new, with a trunk page on port 8084): the test course, the slope tiles, the box controller, coins, hints and the bot.
+- 247 tests (46 more than Phase 4): sweeps, floors, slopes both ways at several speeds, tunnelling at 100,000 units per second, one-way platforms, ledges and step height, low ceilings, crates, hazards, layers, rays, the spatial hash, overlap pairs and swept sensors, Tiled properties, objects and the rebuild, prefabs, child bodies, and the bot finishing the course. The reference PNGs are unchanged.
+- CI: `collision --demo --physics-debug`.
+
+### Verified
+
+- All tests pass; fmt, clippy (desktop and wasm) and rustdoc with warnings denied are clean.
+- Desktop (Windows, GTX 1650), `collision --demo`, on Vulkan and on Direct3D 12: 60 fps; the course is complete in 16.9 s of game time with 39 of 39 coins and no restarts; the dash stopped at x 1650.0 (the pillar's face at 1656 minus half the box); the slam landed on a one-way cloud at 3,000 units per second. The other four examples still run without warnings.
+- Web (`trunk serve`, the app's browser pane, debug wasm), checked by screenshot: the course with the slope tiles, the parallax hills, planks and clouds, and the debug drawing (tile edges, slope surfaces, crossed spikes, amber sensors and hints, the box). `?demo` runs the course to the goal flag and stops.
+- Not checked by me: the desktop window by screenshot, playing with keyboard, gamepad or touch, and WARP (`WGPU_ADAPTER_NAME` did not pick it for the windowed run; the demo is frame-rate independent anyway). See the manual checks.
+
+### Manual checks for the user
+
+- Desktop: `cargo run -p collision`. Run up and down both hills: the box should stay on the slopes without bumps at the top or bottom. Jump over the spikes (touching them sends you back to the start), up the planks, and along the high plateau. Down + jump drops through planks and clouds; S or Down in the air slams. Shift dashes: into the pillar it should stop dead, never pass through. Climb the crates and jump the pit to the flag.
+- Press F1 to see the colliders: blue tile edges and slope lines, cyan one-way platforms, red crossed spikes, green crates, amber coins and hints, the magenta box with its contacts in yellow. With it on, a white ray follows the mouse and stops at what it hits.
+- `cargo run -p collision -- --demo` watches the bot run the course.
+- Live editing: with the example running, open `examples/collision/assets/maps/course.tmx` in Tiled, change the ground and save; the log says `rebuilt collision for maps/course.tmx`.
+- Web: `cd examples/collision && trunk serve --port 8084`, then open <http://127.0.0.1:8084> (and `?physics-debug`, `?demo`).
+
 ## Known issues
 
 - On the web, `AppExit` stops the loop but leaves the page; there is nowhere to exit to.
@@ -285,13 +340,22 @@ Other choices made during the phase:
 - Tile chunks are cached as queued sprites on the CPU and copied into the sprite queue each frame, not kept as GPU buffers. At the example's size that is about 320 tiles a frame; revisit if a level gets much larger.
 - Browsers hide the adapter name behind WebGPU, so `RenderStats::adapter()` reads "an unnamed GPU" there.
 - With 20,000 bunnies in a debug wasm build, WebGL2 drops to 30 fps. A release web build is Phase 10's job.
+- Kinematic bodies are axis-aligned boxes and collide with every collider as its bounding box; rotated rectangles stay axis-aligned.
+- Slopes carry a body by its foot, so its corners hang over or into the hill; slopes block only from above, so their high side should meet a solid tile or another slope. Ceiling slopes (tiles flipped vertically) collide as solid blocks. A body wider than twice a slope's run climbs it by its corner.
+- Hazard tiles hurt over their whole cell, so a body jumping just over Kenney's low spikes can be hit by the empty top of the cell.
+- Static colliders moved by code do not push or carry kinematic bodies (no moving platforms yet), and bodies do not block each other.
+- Overlaps are checked once per step. A fast body is tested by its swept box, which on a diagonal move also covers corners it never crossed.
+- Queries (`SpatialQuery`) see colliders where they were at the end of the latest physics step, not changes made since.
+- Hot-reloading a map rebuilds its collision and respawns its objects; in the `collision` example that restarts the run.
 
 ## Notes for later phases
 
 - **Any phase:** `trunk` only watches the example folder, so touch the example after editing engine crates while `trunk serve` runs.
-- **Phase 5:** physics should run in `FixedUpdate` on `Transform2D` and use `Interpolated` for drawing. Order collision before `TransformSystems::Propagate` in `FixedPostUpdate`, or read `Transform2D` directly.
-- **Phase 5:** tile collision can read the map through the entity's `Tilemap` handle: `TiledMap::tile(layer, cell)`, `tile_info(tile).properties` and `world_to_tile` / `tile_to_world` (map-local; apply the map entity's transform). `examples/tiled_map`'s tileset already marks `solid`, `one_way` and `hazard` tiles (and a 22.5°/45° slope set would need tiles marked the same way). `TiledObject::shape` gives object colliders in world units.
-- **Phase 5:** `examples/tiled_map` has a `PlayerStart` point and a `Goal`, so the collision example can reuse its level.
+- **Phase 6:** the animation state machine can read `KinematicContacts` (`on_ground`, `just_landed`, `on_slope`, `on_wall`) and `KinematicBody::velocity` for its parameters; landing dust can spawn on `just_landed`. Physics runs in `FixedPostUpdate`, so read contacts in `FixedUpdate` (or `Update` for visuals).
+- **Phase 6:** `examples/collision`'s box and its `Intent`/bot split are a starting point for the animated character; Kenney's character tiles are in `examples/tiled_map/assets/images/characters.png`.
+- **Phase 9:** build the player controller on `KinematicBody` (coyote time from `just_left_ground`, jump buffer, variable jump as in `examples/collision`). Enemies can be kinematic bodies on their own `CollisionLayers`; stomps come from `CollisionStarted` plus comparing velocities or positions. Moving platforms need carrying (backlog). Tag tiles in the platformer's tileset with the same `solid`/`one_way`/`slope_left`/`slope_right`/`hazard` properties and copy `slopes.png`/`slopes.tsx` from `examples/collision`.
+- **Phase 12:** an `on_collision` Lua hook can be fed from `CollisionStarted`/`CollisionEnded`.
+- **Phase 13:** the editor can draw colliders through `PhysicsDebug` and pick entities with `SpatialQuery::overlap_point`.
 - **Phase 6:** camera follow, shake and zoom tweens should move the camera entity in `FixedUpdate` with `Interpolated`, as `ecs_sprites` does.
 - **Phase 13:** add `bevy_reflect` derives for the inspector; keep serde for prefab files. `Prefab::to_ron` already writes prefabs, but capturing a live entity back into a prefab still needs a `to_data` direction on `PrefabComponent`.
 - **Phase 6:** Aseprite JSON can be an `AssetLoader` producing an atlas-like asset (frames are regions); `tiled_map`'s `Frames` component (cycling `AtlasSprite::region`) is a stand-in until real clips. Tiled tile animations belong there too.
@@ -314,3 +378,7 @@ Features that came up but don't serve the platformer or a listed example go here
 - Packing atlases at runtime (Phase 4 packs them with `cg_pack`), and per-load loader settings (an image's filter, say).
 - Image-collection tilesets, tile animations, and isometric or hexagonal maps in `cg_tiled`.
 - Asset bundling in `cg_pack` (the plan's other `cg_pack` job) is Phase 10's.
+- `rapier2d` behind a feature, for dynamic rigid bodies (tumbling crates, ragdolls).
+- Moving platforms that carry bodies, one-way entity colliders, and bodies pushed by moving colliders.
+- Partial-cell tile shapes from Tiled's tile collision editor (low spikes, half blocks), and ceiling slopes.
+- Rotated (oriented) boxes and polygon colliders.

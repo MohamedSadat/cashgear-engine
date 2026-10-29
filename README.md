@@ -2,7 +2,7 @@
 
 CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WASM) and Android, built with `winit`, `wgpu` and `bevy_ecs`. A sample platformer (`games/platformer`) proves it. The engine is built in 15 phases; see [docs/PLAN.md](docs/PLAN.md) for the plan and [docs/PROGRESS.md](docs/PROGRESS.md) for where it stands.
 
-> **Status:** Phase 4. `cg_core` (app, plugins, fixed-timestep loop, `Time`, schedules), `cg_platform` (window, input, actions, lifecycle, logging, asset IO), `cg_render` (`wgpu` sprites, camera, virtual resolutions, debug shapes, culling, image and atlas assets), `cg_world` (transforms and hierarchy, interpolation, a game-state stack, RON prefabs), `cg_assets` (handles, background loading, loading states, hot reload) and `cg_tiled` (Tiled maps with parallax, chunked tiles and object prefabs) work on desktop and web. Collision arrives in Phase 5.
+> **Status:** Phase 5. `cg_core` (app, plugins, fixed-timestep loop, `Time`, schedules), `cg_platform` (window, input, actions, lifecycle, logging, asset IO), `cg_render` (`wgpu` sprites, camera, virtual resolutions, debug shapes, culling, image and atlas assets), `cg_world` (transforms and hierarchy, interpolation, a game-state stack, RON prefabs), `cg_assets` (handles, background loading, loading states, hot reload), `cg_tiled` (Tiled maps with parallax, chunked tiles and object prefabs) and `cg_physics` (kinematic bodies with slopes and one-way platforms, tile and entity colliders, sensors, layers, raycasts) work on desktop and web. Animation arrives in Phase 6.
 
 ## Workspace layout
 
@@ -35,6 +35,7 @@ Each example is its own binary crate under `examples/`, with an `index.html` for
 | `bunnymark` | Thousands of bouncing sprites, scaling modes, camera controls and debug shapes; `--ecs` makes each bunny an entity |
 | `ecs_sprites` | Prefabs and images loaded as assets, a transform hierarchy, interpolation, visibility, culling and a Loading / Menu / Playing / Paused state stack |
 | `tiled_map` | A Tiled level with Kenney art: a loading bar, parallax, chunked tiles, object prefabs, an atlas packed by `cg_pack`, and live editing |
+| `collision` | A box runs a Tiled test course: 45° and 22.5° slopes, one-way platforms, spikes, crates, coin sensors, a dash and a slam that pass through nothing; F1 draws the colliders, `--demo` lets a bot run it |
 
 ```sh
 cargo run -p hello_window                  # desktop
@@ -42,15 +43,17 @@ cargo run -p hello_window -- --frames 120  # run 120 frames, then exit (every ex
 cargo run -p bunnymark --release -- --bunnies 50000 --no-vsync
 cargo run -p ecs_sprites                   # add -- --demo to cycle the states by itself
 cargo run -p tiled_map                     # edit examples/tiled_map/assets/maps/level.tmx in Tiled while it runs
+cargo run -p collision                     # add -- --demo for the bot, --physics-debug to draw colliders
 
 cargo install trunk --locked               # once
 cd examples/hello_window && trunk serve    # web: open http://127.0.0.1:8080
 cd examples/bunnymark && trunk serve --port 8081   # flags go in the URL: ?bunnies=20000&backend=gl
 cd examples/ecs_sprites && trunk serve --port 8082
 cd examples/tiled_map && trunk serve --port 8083
+cd examples/collision && trunk serve --port 8084
 ```
 
-Every example takes `--frames N`, `--no-vsync` and `--backend <vulkan|dx12|metal|gl|webgpu>`; on the web they go in the page URL as `?frames=N&no-vsync&backend=gl`. The asset flags are `--hot-reload` / `--no-hot-reload` (on by default in debug desktop builds), `--asset-root <path>` and `--asset-delay <seconds>` (slows loading down to try loading screens).
+Every example takes `--frames N`, `--no-vsync` and `--backend <vulkan|dx12|metal|gl|webgpu>`; on the web they go in the page URL as `?frames=N&no-vsync&backend=gl`. The asset flags are `--hot-reload` / `--no-hot-reload` (on by default in debug desktop builds), `--asset-root <path>` and `--asset-delay <seconds>` (slows loading down to try loading screens). `--physics-debug` starts with colliders drawn (F1 toggles them).
 
 ### Assets
 

@@ -3,6 +3,27 @@
 All notable changes to CashGear Engine are recorded here, one section per phase.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Phase 5 — Collision and physics
+
+### Added
+
+- `cg_physics`: the `Collider` component, an axis-aligned rectangle or a circle (`ColliderShape`) with an offset, placed by the entity's transform. A collider on its own is static and blocks bodies; with `Sensor` it only reports overlaps; with `KinematicBody` it is the body's shape.
+- `cg_physics`: `KinematicBody`, moved by its velocity in each fixed step with `Gravity` (980 units per second squared down by default, per-body `gravity_scale` and `max_fall_speed`). Moves are swept per axis over the whole distance, in sub-steps of at most 8 units, so nothing tunnels at any speed (tested at 100,000 units per second). Grounded bodies follow slopes up and down, stay on the ground over small drops (`snap_distance`), and can step up low ledges (`step_height`). Setting `drop_through` drops through one-way platforms; a too-low gap under a ceiling stops a climb.
+- `cg_physics`: `KinematicContacts` with the ground, ceiling and walls a body touched (entity, tile cell and normal), `hazard`, `just_landed`, `just_left_ground`, `on_slope` and the ground normal.
+- `cg_physics`: tile collision. `TileGrid` holds `TileCell`s: solid, one-way, slopes from any left to right height (45° and 22.5° included), each optionally a hazard; `TileGrid::parse` builds one from text. `TileCollider` puts a grid in the world. Slopes carry bodies by their foot, as platformer characters stand.
+- `cg_physics`: Tiled support. Every `Tilemap` gets a `TileCollider` from its tile layers with a `collision` property, read from the tiles' `solid`, `one_way`, `slope_left`/`slope_right` and `hazard` properties (slopes flipped horizontally slope the other way); it is rebuilt when the map changes. Objects with a `collider` or `sensor` property get a collider of their shape. `TileGrid::from_tiled_map`.
+- `cg_physics`: `CollisionLayers` (32 membership and filter bits) for colliders and tile maps.
+- `cg_physics`: overlap reporting. `CollisionStarted` and `CollisionEnded` messages and the `Overlaps` resource cover every interacting pair except two static colliders. Moving bodies are tested against sensors by the box they swept, so a dash still collects the coins it passes. The `PhysicsWorld` snapshot uses a spatial hash.
+- `cg_physics`: `SpatialQuery` for raycasts (`RayHit`; solids from any side, one-way platforms and slopes from above), `overlap_point`, `overlap_shape` and `tile_at`, with `QueryFilter` (layers, an excluded entity, sensors, tiles).
+- `cg_physics`: `PhysicsDebug` draws tiles, colliders, sensors, bodies and their contacts; F1 toggles it and `--physics-debug` starts with it on.
+- `cg_physics`: `PhysicsPlugin` (the physics in `FixedPostUpdate` after transform propagation, in the `PhysicsSystems` sets) and a prelude. `Collider`, `Sensor`, `KinematicBody` and `CollisionLayers` are registered for prefabs and Tiled properties.
+- `examples/collision`: a Tiled test course with original slope tiles made from Kenney's grass tile, one-way planks and clouds, spikes, crates, coins, a dash and a slam. `--demo` lets a bot run it with raycasts and hints, exiting with an error if it fails; a test runs the same bot without a window.
+- CI: `collision --demo --physics-debug`.
+
+### Changed
+
+- `DefaultPlugins` adds `PhysicsPlugin` (field `physics`, flag `--physics-debug`); the prelude includes the physics items.
+
 ## Phase 4 — Assets and tilemaps
 
 ### Added

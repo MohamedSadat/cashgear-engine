@@ -44,6 +44,7 @@ pub use cg_world as world;
 
 use cg_assets::AssetPlugin;
 use cg_core::{App, FrameLimitPlugin, Plugin};
+use cg_physics::PhysicsPlugin;
 use cg_platform::input::InputPlugin;
 use cg_platform::{Args, LogPlugin, WindowConfig, WindowPlugin};
 use cg_render::RenderPlugin;
@@ -55,12 +56,13 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The standard set of plugins for a game: logging, the `--frames N` flag, input, the
 /// world (transforms, interpolation, prefabs), assets, the window with its runner, the
-/// renderer and Tiled maps.
+/// renderer, Tiled maps and physics.
 ///
 /// Launch flags work on desktop and, as a query string (`?frames=60&backend=gl`), on the
 /// web: `--frames N` exits after N frames, `--no-vsync` and `--backend <list>` configure
-/// the renderer, and `--hot-reload`, `--no-hot-reload`, `--asset-root <path>` and
-/// `--asset-delay <seconds>` the assets.
+/// the renderer, `--hot-reload`, `--no-hot-reload`, `--asset-root <path>` and
+/// `--asset-delay <seconds>` the assets, and `--physics-debug` draws colliders from the
+/// start.
 ///
 /// Configure it with struct-update syntax:
 ///
@@ -85,6 +87,8 @@ pub struct DefaultPlugins {
     pub render: RenderPlugin,
     /// Asset settings. The asset flags override them.
     pub assets: AssetPlugin,
+    /// Physics settings. `--physics-debug` overrides them.
+    pub physics: PhysicsPlugin,
 }
 
 impl Plugin for DefaultPlugins {
@@ -101,17 +105,19 @@ impl Plugin for DefaultPlugins {
                 window: self.window.clone(),
             })
             .add_plugins(self.render.clone().with_args(&args))
-            .add_plugins(TiledPlugin);
+            .add_plugins(TiledPlugin)
+            .add_plugins(self.physics.clone().with_args(&args));
     }
 }
 
 /// Common imports for game code: the app and plugins, schedules, time, the ECS, `glam`
 /// vectors, logging macros, the window, input, transforms, states, prefabs, assets,
-/// rendering and Tiled maps.
+/// rendering, Tiled maps and physics.
 pub mod prelude {
     pub use crate::DefaultPlugins;
     pub use cg_assets::prelude::*;
     pub use cg_core::prelude::*;
+    pub use cg_physics::prelude::*;
     pub use cg_platform::prelude::*;
     pub use cg_render::prelude::*;
     pub use cg_tiled::prelude::*;
