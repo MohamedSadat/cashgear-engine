@@ -1,6 +1,6 @@
 //! Core of CashGear Engine: the [`App`] builder, the [`Plugin`] trait, the fixed-timestep
-//! game loop, the [`Time`] resource and messages. Re-exports [`bevy_ecs`] as [`ecs`],
-//! [`glam`] for maths and [`log`] for logging.
+//! game loop, the [`Time`] resource, messages and the [`Rect`] type. Re-exports
+//! [`bevy_ecs`] as [`ecs`], [`glam`] for maths and [`log`] for logging.
 //!
 //! This crate has no platform code. The window, the input and the runner that drives the
 //! frames come from `cg_platform`; logging output is set up there too.
@@ -8,15 +8,17 @@
 mod app;
 mod exit;
 mod plugin;
+mod rect;
 pub mod schedule;
 mod time;
 
 pub use app::App;
 pub use exit::{AppExit, FrameLimit, FrameLimitPlugin};
 pub use plugin::Plugin;
+pub use rect::Rect;
 pub use schedule::{
-    First, FixedPostUpdate, FixedPreUpdate, FixedUpdate, Last, PostUpdate, PreUpdate, Startup,
-    Update,
+    First, FixedPostUpdate, FixedPreUpdate, FixedUpdate, Last, PostUpdate, PreUpdate, Render,
+    Startup, Update,
 };
 pub use time::{DEFAULT_FIXED_HZ, DEFAULT_MAX_DELTA, DEFAULT_MAX_FIXED_STEPS, Time};
 
@@ -30,14 +32,14 @@ pub fn default<T: Default>() -> T {
     T::default()
 }
 
-/// Common imports: the app, schedules, time, the ECS prelude, `glam` vectors and the
-/// logging macros.
+/// Common imports: the app, schedules, time, the ECS prelude, `glam` vectors, [`Rect`] and
+/// the logging macros.
 pub mod prelude {
     pub use crate::schedule::{
-        First, FixedPostUpdate, FixedPreUpdate, FixedUpdate, Last, PostUpdate, PreUpdate, Startup,
-        Update,
+        First, FixedPostUpdate, FixedPreUpdate, FixedUpdate, Last, PostUpdate, PreUpdate, Render,
+        Startup, Update,
     };
-    pub use crate::{App, AppExit, Plugin, Time, default};
+    pub use crate::{App, AppExit, Plugin, Rect, Time, default};
     pub use bevy_ecs::prelude::*;
     // bevy's derive macros (`Resource`, `Component`, `Message`) expand to `bevy_ecs::...`
     // paths. This makes them resolve in game crates that depend only on the engine.

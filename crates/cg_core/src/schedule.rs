@@ -9,7 +9,8 @@
 //!    [`FixedPostUpdate`]. Gameplay belongs in [`FixedUpdate`].
 //! 5. [`Update`]: per-frame logic that does not need a fixed rate.
 //! 6. [`PostUpdate`]: engine work that reacts to this frame's changes.
-//! 7. [`Last`]: end-of-frame cleanup, such as clearing just-pressed input.
+//! 7. [`Render`]: the renderer draws the frame.
+//! 8. [`Last`]: end-of-frame cleanup, such as clearing just-pressed input.
 
 use bevy_ecs::schedule::ScheduleLabel;
 
@@ -46,6 +47,10 @@ pub struct Update;
 /// Runs after [`Update`]. Reserved for engine work such as transform propagation.
 #[derive(ScheduleLabel, Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PostUpdate;
+
+/// Runs after [`PostUpdate`]. The renderer draws what was queued this frame here.
+#[derive(ScheduleLabel, Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Render;
 
 /// Runs last in every frame. Reserved for engine cleanup.
 #[derive(ScheduleLabel, Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]

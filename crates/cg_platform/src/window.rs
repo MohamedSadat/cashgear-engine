@@ -3,6 +3,7 @@
 use cg_core::ecs::prelude::*;
 use cg_core::glam::{UVec2, Vec2};
 use cg_core::{App, Plugin};
+use std::sync::Arc;
 
 /// Settings for the game window.
 #[derive(Debug, Clone, PartialEq)]
@@ -19,8 +20,9 @@ pub struct WindowConfig {
     /// Web only: the id of an existing `<canvas>` to draw into. When `None` or not found, a
     /// canvas is appended to the page body.
     pub canvas_id: Option<String>,
-    /// Desktop only: the most frames per second to run. `None` relies on vsync, which
-    /// arrives with the renderer in Phase 2; until then an uncapped loop runs flat out. On
+    /// Desktop only: the most frames per second to run. `None` relies on the renderer's
+    /// vsync; without a renderer (or with vsync off) an uncapped loop runs flat out. While the
+    /// window is hidden or has no area, frames are capped at 60 per second either way. On
     /// the web the browser paces frames with `requestAnimationFrame`.
     pub max_fps: Option<f64>,
 }
@@ -89,6 +91,21 @@ impl Window {
     /// Whether the app is suspended (Android background). No frames run while suspended.
     pub fn suspended(&self) -> bool {
         self.suspended
+    }
+}
+
+/// A shared handle to the native window, for creating a GPU surface.
+///
+/// The runner inserts it when the window is created, before the first frame. The window
+/// lives as long as the app; on Android its native surface comes and goes with
+/// [`Lifecycle::Suspended`] and [`Lifecycle::Resumed`], so recreate GPU surfaces then.
+#[derive(Resource, Clone, Debug)]
+pub struct WindowHandle(pub(crate) Arc<winit::window::Window>);
+
+impl WindowHandle {
+    /// The `winit` window. It implements the `raw-window-handle` traits that `wgpu` needs.
+    pub fn winit(&self) -> &Arc<winit::window::Window> {
+        &self.0
     }
 }
 

@@ -5,8 +5,8 @@
 //! - Web: run `trunk serve` in `examples/hello_window` and open <http://127.0.0.1:8080>. The
 //!   log is in the browser console.
 //!
-//! A pretend player is simulated at 60 Hz in `FixedUpdate`; nothing is drawn until the
-//! renderer arrives in Phase 2.
+//! A pretend player is simulated at 60 Hz in `FixedUpdate` and drawn as a box, interpolated
+//! between fixed steps, with the camera following it along a striped ground.
 //!
 //! | Action | Keyboard | Gamepad | Touch |
 //! | --- | --- | --- | --- |
@@ -45,8 +45,6 @@ fn main() {
             window: WindowConfig {
                 title: "CashGear: hello_window".into(),
                 canvas_id: Some("cashgear".into()),
-                // No renderer yet, so no vsync to pace frames on desktop.
-                max_fps: Some(60.0),
                 ..default()
             },
             ..default()
@@ -58,7 +56,15 @@ fn main() {
         .add_systems(FixedUpdate, move_player)
         .add_systems(
             Update,
-            (log_lifecycle, log_input, log_actions, log_status, quit).chain(),
+            (
+                log_lifecycle,
+                log_input,
+                log_actions,
+                log_status,
+                draw,
+                quit,
+            )
+                .chain(),
         )
         .run();
 }
@@ -194,6 +200,43 @@ fn log_status(time: Res<Time>, player: Res<Player>, mut status: ResMut<Status>) 
         last_report: elapsed,
         ..default()
     };
+}
+
+/// Draws the player where it is between the last two fixed steps, and a striped ground the
+/// camera scrolls over.
+fn draw(
+    time: Res<Time>,
+    player: Res<Player>,
+    window: Res<Window>,
+    mut camera: ResMut<Camera2D>,
+    mut sprites: ResMut<Sprites>,
+) {
+    let drawn = player.previous.lerp(player.position, time.alpha());
+    // Keep the ground near the bottom of the view and the player in the middle.
+    camera.position = vec2(drawn.x, 120.0);
+
+    let view = camera.visible_rect(&window);
+    let stripe = 32.0;
+    let first = (view.min.x / stripe).floor() as i32;
+    let last = (view.max.x / stripe).ceil() as i32;
+    for i in first..last {
+        let color = if i % 2 == 0 { 0x3a3f4b } else { 0x323641 };
+        sprites.draw(Sprite {
+            position: vec2(i as f32 * stripe, 0.0),
+            size: Some(vec2(stripe, 48.0)),
+            pivot: vec2(0.0, 1.0),
+            color: Color::hex(color),
+            ..default()
+        });
+    }
+    sprites.draw(Sprite {
+        position: drawn,
+        size: Some(vec2(16.0, 24.0)),
+        pivot: vec2(0.5, 0.0),
+        color: Color::hex(0xffbe0b),
+        layer: 1,
+        ..default()
+    });
 }
 
 fn quit(actions: Res<ActionState>, mut exit: MessageWriter<AppExit>) {

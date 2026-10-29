@@ -9,7 +9,13 @@
 //! fn main() {
 //!     App::new()
 //!         .add_plugins(DefaultPlugins::default())
-//!         .add_systems(Startup, || info!("hello"))
+//!         .add_systems(Update, |mut sprites: ResMut<Sprites>| {
+//!             sprites.draw(Sprite {
+//!                 size: Some(vec2(32.0, 32.0)),
+//!                 color: Color::hex(0xffbe0b),
+//!                 ..default()
+//!             });
+//!         })
 //!         .run();
 //! }
 //! ```
@@ -29,13 +35,18 @@ pub use cg_world as world;
 
 use cg_core::{App, FrameLimitPlugin, Plugin};
 use cg_platform::input::InputPlugin;
-use cg_platform::{LogPlugin, WindowConfig, WindowPlugin};
+use cg_platform::{Args, LogPlugin, WindowConfig, WindowPlugin};
+use cg_render::RenderPlugin;
 
 /// The engine version, taken from the crate manifest.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// The standard set of plugins for a game: logging, the `--frames N` flag, input, and the
-/// window with its runner.
+/// The standard set of plugins for a game: logging, the `--frames N` flag, input, the
+/// window with its runner, and the renderer.
+///
+/// Launch flags work on desktop and, as a query string (`?frames=60&backend=gl`), on the
+/// web: `--frames N` exits after N frames, `--no-vsync` and `--backend <list>` configure
+/// the renderer.
 ///
 /// Configure it with struct-update syntax:
 ///
@@ -56,25 +67,32 @@ pub struct DefaultPlugins {
     pub window: WindowConfig,
     /// Logging settings.
     pub log: LogPlugin,
+    /// Renderer settings. The `--no-vsync` and `--backend` flags override them.
+    pub render: RenderPlugin,
 }
 
 impl Plugin for DefaultPlugins {
     fn build(&self, app: &mut App) {
+        let args = Args::from_env();
         app.add_plugins(self.log)
-            .add_plugins(FrameLimitPlugin::from_args())
+            .add_plugins(FrameLimitPlugin {
+                frames: args.parse("frames"),
+            })
             .add_plugins(InputPlugin::default())
             .add_plugins(WindowPlugin {
                 window: self.window.clone(),
-            });
+            })
+            .add_plugins(self.render.clone().with_args(&args));
     }
 }
 
 /// Common imports for game code: the app and plugins, schedules, time, the ECS, `glam`
-/// vectors, logging macros, the window and input.
+/// vectors, logging macros, the window, input and rendering.
 pub mod prelude {
     pub use crate::DefaultPlugins;
     pub use cg_core::prelude::*;
     pub use cg_platform::prelude::*;
+    pub use cg_render::prelude::*;
 }
 
 #[cfg(test)]

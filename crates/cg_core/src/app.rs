@@ -1,8 +1,8 @@
 //! The [`App`] builder and the frame loop it drives.
 
 use crate::schedule::{
-    First, FixedPostUpdate, FixedPreUpdate, FixedUpdate, Last, PostUpdate, PreUpdate, Startup,
-    Update,
+    First, FixedPostUpdate, FixedPreUpdate, FixedUpdate, Last, PostUpdate, PreUpdate, Render,
+    Startup, Update,
 };
 use crate::{AppExit, Plugin, Time};
 use bevy_ecs::message::{
@@ -62,6 +62,7 @@ impl App {
             FixedPostUpdate.intern(),
             Update.intern(),
             PostUpdate.intern(),
+            Render.intern(),
             Last.intern(),
         ] {
             world.add_schedule(Schedule::new(label));
@@ -186,6 +187,7 @@ impl App {
         world.resource_mut::<Time>().end_fixed_steps();
         world.run_schedule(Update);
         world.run_schedule(PostUpdate);
+        world.run_schedule(Render);
         world.run_schedule(Last);
         world.clear_trackers();
     }
@@ -238,6 +240,7 @@ mod tests {
             .add_systems(FixedPostUpdate, record("fixed_post_update"))
             .add_systems(Update, record("update"))
             .add_systems(PostUpdate, record("post_update"))
+            .add_systems(Render, record("render"))
             .add_systems(Last, record("last"));
         app
     }
@@ -261,6 +264,7 @@ mod tests {
                 "fixed_post_update",
                 "update",
                 "post_update",
+                "render",
                 "last",
             ]
         );

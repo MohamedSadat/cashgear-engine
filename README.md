@@ -2,7 +2,7 @@
 
 CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WASM) and Android, built with `winit`, `wgpu` and `bevy_ecs`. A sample platformer (`games/platformer`) proves it. The engine is built in 15 phases; see [docs/PLAN.md](docs/PLAN.md) for the plan and [docs/PROGRESS.md](docs/PROGRESS.md) for where it stands.
 
-> **Status:** Phase 1. `cg_core` (app, plugins, fixed-timestep loop, `Time`) and `cg_platform` (window, input, actions, lifecycle, logging) work on desktop and web. Rendering arrives in Phase 2.
+> **Status:** Phase 2. `cg_core` (app, plugins, fixed-timestep loop, `Time`), `cg_platform` (window, input, actions, lifecycle, logging) and `cg_render` (`wgpu` sprites, camera, virtual resolutions, debug shapes) work on desktop and web. ECS components and scenes arrive in Phase 3.
 
 ## Workspace layout
 
@@ -31,15 +31,20 @@ Each example is its own binary crate under `examples/`, with an `index.html` for
 
 | Example | Shows |
 | --- | --- |
-| `hello_window` | The window, the game loop and input logging on desktop and web |
+| `hello_window` | The window, the game loop, input logging and an interpolated player box |
+| `bunnymark` | Thousands of bouncing sprites, scaling modes, camera controls and debug shapes |
 
 ```sh
 cargo run -p hello_window                  # desktop
 cargo run -p hello_window -- --frames 120  # run 120 frames, then exit (every example)
+cargo run -p bunnymark --release -- --bunnies 50000 --no-vsync
 
 cargo install trunk --locked               # once
 cd examples/hello_window && trunk serve    # web: open http://127.0.0.1:8080
+cd examples/bunnymark && trunk serve --port 8081   # flags go in the URL: ?bunnies=20000&backend=gl
 ```
+
+Every example takes `--frames N`, `--no-vsync` and `--backend <vulkan|dx12|metal|gl|webgpu>`; on the web they go in the page URL as `?frames=N&no-vsync&backend=gl`.
 
 ## Development
 
@@ -55,6 +60,12 @@ cargo clippy-wasm  # alias: the same, linted with warnings denied (CI runs this)
 ```
 
 CI runs all of these on Windows and Ubuntu for every push to `main` and every pull request.
+
+`cg_render`'s reference-image tests render scenes offscreen and compare them with the PNGs in `crates/cg_render/tests/golden/`. Without a GPU they use a software adapter (WARP on Windows, Mesa lavapipe on Linux) or skip with a note; `CG_REQUIRE_GPU=1` makes a missing adapter a failure, as in CI. After an intended visual change, regenerate and review the references:
+
+```sh
+CG_UPDATE_GOLDEN=1 cargo test -p cg_render --test golden
+```
 
 ### Portability rules
 

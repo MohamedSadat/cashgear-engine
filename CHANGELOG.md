@@ -3,6 +3,34 @@
 All notable changes to CashGear Engine are recorded here, one section per phase.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Phase 2 — Renderer core
+
+### Added
+
+- `cg_render`: `RenderPlugin` on `wgpu` 30, with Vulkan, Direct3D 12, Metal and GL on desktop, and WebGPU with a WebGL2 fallback on the web. GPU setup runs async (a few frames on the web); vsync is on by default.
+- `cg_render`: surface handling. Resizes and outdated surfaces reconfigure; a lost surface is recreated; the surface is dropped on suspend and recreated on resume; a lost device is set up again.
+- `cg_render`: `Textures` with `TextureId` handles (and the always-present `TextureId::WHITE`), `Image` (RGBA8, PNG decode and encode), and per-texture `Filter::Nearest` (default) or `Filter::Linear`. Mipmaps are off.
+- `cg_render`: `Sprites`, a per-frame queue of `Sprite`s (texture, position, rotation, scale, size, source rect, pivot, tint, flips, layer). Instanced quads are sorted by layer then texture, with one draw call per batch.
+- `cg_render`: the `Camera2D` resource (position, zoom, rotation, clear and bar colours, pixel snapping) with `world_to_screen`, `screen_to_world` and `visible_rect`.
+- `cg_render`: `ScalingMode::{WindowSize, Stretch, Letterbox, PixelPerfect}`. The default is pixel-perfect 640×360: the scene is drawn at the virtual resolution, then scaled up by a whole number.
+- `cg_render`: `DebugShapes` (lines, rectangle and circle outlines and fills) drawn at window resolution with widths in logical pixels.
+- `cg_render`: `RenderStats` (draw calls, sprites, batches, shapes, average frame time and fps, adapter and backend).
+- `cg_render`: `OffscreenRenderer`, which renders to an `Image` through the window's code path, and reference-image tests in `tests/golden` that run on WARP and lavapipe in CI.
+- `cg_core`: the `Render` schedule between `PostUpdate` and `Last`, and the `Rect` type.
+- `cg_platform`: the `WindowHandle` resource, `tasks::spawn_local` for async work without threads, and `Args`, which reads launch flags from the command line or the page's query string.
+- `cashgear_engine`: `DefaultPlugins` includes `RenderPlugin` and applies `--no-vsync` and `--backend`; the prelude covers rendering.
+- `examples/bunnymark`: 10,000+ bouncing, interpolated sprites in four textures. The pointer adds bunnies, keys switch scaling modes and move the camera, and debug shapes toggle.
+- CI: Mesa lavapipe on Ubuntu, `CG_REQUIRE_GPU=1` for the tests, a `bunnymark --frames 120` run, and uploads of failed reference images.
+
+### Changed
+
+- `examples/hello_window` draws its player box over a striped ground, and no longer caps the frame rate: vsync paces it.
+- The desktop runner caps frames at 60 per second while the window is hidden or has no area, and requests redraws from `about_to_wait`.
+- On the web the runner sizes the canvas's drawing buffer to the window's physical size, which WebGL2 needs.
+- `--frames N` is read through `Args`, so it also works on the web as `?frames=N`.
+- Dependencies build with `opt-level = 2` in the dev profile.
+- The default log filter shows only errors from `wgpu_hal`.
+
 ## Phase 1 — Platform layer and game loop
 
 ### Added

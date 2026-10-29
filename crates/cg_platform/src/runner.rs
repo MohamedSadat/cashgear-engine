@@ -1,21 +1,23 @@
 //! The `winit` runner: owns the event loop and the window, feeds window and input events
 //! into the app, and runs one app frame per redraw.
 //!
-//! Desktop: `run_app` blocks until the app exits. An optional `max_fps` cap waits with
-//! `ControlFlow::WaitUntil` between frames. Web: `spawn_app` hands the loop to the browser
-//! and returns at once; `request_redraw` maps to `requestAnimationFrame`, which paces the
-//! frames.
+//! Desktop: `run_app` blocks until the app exits. Vsync in the renderer paces the frames;
+//! an optional `max_fps` cap, and a 60 fps cap while the window is hidden, wait with
+//! `ControlFlow::WaitUntil` between frames instead. Web: `spawn_app` hands the loop to the
+//! browser and returns at once; `request_redraw` maps to `requestAnimationFrame`, which
+//! paces the frames.
 
 // The runner is the one place that reads the clock. `web_time::Instant` is the browser's
 // `performance.now()` on the web and `std::time::Instant` on desktop.
 #![allow(clippy::disallowed_methods)]
 
 use crate::input::{ButtonInput, KeyCode, MouseButton, PointerId, Pointers};
-use crate::window::{Lifecycle, Window, WindowConfig};
+use crate::window::{Lifecycle, Window, WindowConfig, WindowHandle};
 use cg_core::ecs::change_detection::Mut;
 use cg_core::glam::{UVec2, Vec2};
 use cg_core::{App, AppExit};
 use core::time::Duration;
+use std::sync::Arc;
 use web_time::Instant;
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
@@ -23,6 +25,10 @@ use winit::event::{ElementState, MouseScrollDelta, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::PhysicalKey;
 use winit::window::{Window as WinitWindow, WindowAttributes, WindowId};
+
+/// Frame rate on desktop while the window is hidden or has no area. Nothing is presented
+/// then, so vsync cannot pace the loop.
+const IDLE_FPS: f64 = 60.0;
 
 /// Runs `app` in a window until it exits.
 pub(crate) fn run(app: App, config: WindowConfig) -> AppExit {
@@ -55,7 +61,7 @@ fn run_event_loop(event_loop: EventLoop<()>, runner: Runner) -> AppExit {
 struct Runner {
     app: App,
     config: WindowConfig,
-    window: Option<WinitWindow>,
+    window: Option<Arc<WinitWindow>>,
     suspended: bool,
     last_frame: Option<Instant>,
     next_frame: Instant,
@@ -75,15 +81,25 @@ impl Runner {
         }
     }
 
-    /// Time between frames when the desktop frame cap is on.
+    /// Time between frames when a desktop frame cap applies: the configured `max_fps`, or
+    /// [`IDLE_FPS`] while the window is hidden or has no area.
     fn frame_interval(&self) -> Option<Duration> {
         if cfg!(target_arch = "wasm32") {
             return None;
         }
-        self.config
+        let window = self.app.world().resource::<Window>();
+        let idle = window.occluded || window.physical_size.cmpeq(UVec2::ZERO).any();
+        let max_fps = self
+            .config
             .max_fps
-            .filter(|fps| fps.is_finite() && *fps > 0.0)
-            .map(|fps| Duration::from_secs_f64(1.0 / fps))
+            .filter(|fps| fps.is_finite() && *fps > 0.0);
+        let fps = match (max_fps, idle) {
+            (Some(fps), true) => Some(fps.min(IDLE_FPS)),
+            (Some(fps), false) => Some(fps),
+            (None, true) => Some(IDLE_FPS),
+            (None, false) => None,
+        };
+        fps.map(|fps| Duration::from_secs_f64(1.0 / fps))
     }
 
     fn window_attributes(&self) -> WindowAttributes {
@@ -122,12 +138,6 @@ impl Runner {
         if let Some(exit) = self.app.should_exit() {
             log::info!("exiting: {exit:?}");
             self.exit(event_loop, exit);
-            return;
-        }
-        if self.frame_interval().is_none()
-            && let Some(window) = &self.window
-        {
-            window.request_redraw();
         }
     }
 
@@ -225,6 +235,7 @@ impl ApplicationHandler for Runner {
                     return;
                 }
             };
+            let window = Arc::new(window);
             let PhysicalSize { width, height } = window.inner_size();
             let size = match platform_window_created(&window) {
                 Some(measured) if width == 0 || height == 0 => measured,
@@ -237,10 +248,14 @@ impl ApplicationHandler for Runner {
                 size.x,
                 size.y
             );
+            platform_resized(&window, size);
             let mut state = self.window_mut();
             state.physical_size = size;
             state.scale_factor = scale_factor;
             state.focused = focused;
+            self.app
+                .world_mut()
+                .insert_resource(WindowHandle(window.clone()));
             self.window = Some(window);
         }
         self.suspended = false;
@@ -271,7 +286,11 @@ impl ApplicationHandler for Runner {
                 self.exit(event_loop, AppExit::Success);
             }
             WindowEvent::Resized(PhysicalSize { width, height }) => {
-                self.window_mut().physical_size = UVec2::new(width, height);
+                let size = UVec2::new(width, height);
+                if let Some(window) = &self.window {
+                    platform_resized(window, size);
+                }
+                self.window_mut().physical_size = size;
                 self.lifecycle(Lifecycle::Resized { width, height });
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
@@ -324,8 +343,11 @@ impl ApplicationHandler for Runner {
                 }
                 event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame));
             }
-            // Each frame requests the next redraw; vsync or the browser paces them.
-            None => event_loop.set_control_flow(ControlFlow::Wait),
+            // Ask for the next frame at once; vsync or the browser paces them.
+            None => {
+                window.request_redraw();
+                event_loop.set_control_flow(ControlFlow::Wait);
+            }
         }
     }
 }
@@ -363,6 +385,25 @@ fn platform_attributes(attributes: WindowAttributes, config: &WindowConfig) -> W
 #[cfg(not(target_arch = "wasm32"))]
 fn platform_window_created(_window: &WinitWindow) -> Option<UVec2> {
     None
+}
+
+/// Per-platform work when the window's size in physical pixels changes.
+#[cfg(not(target_arch = "wasm32"))]
+fn platform_resized(_window: &WinitWindow, _size: UVec2) {}
+
+#[cfg(target_arch = "wasm32")]
+fn platform_resized(window: &WinitWindow, size: UVec2) {
+    use winit::platform::web::WindowExtWebSys;
+
+    // CSS sizes the canvas element, but its drawing buffer keeps its own size (300x150 by
+    // default). WebGPU resizes it when the surface is configured; WebGL2 does not.
+    if let Some(canvas) = window.canvas()
+        && size.x > 0
+        && size.y > 0
+    {
+        canvas.set_width(size.x);
+        canvas.set_height(size.y);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

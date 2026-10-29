@@ -7,7 +7,8 @@ use log::LevelFilter;
 /// on the web, where it also turns panics into readable console errors.
 ///
 /// On desktop the `RUST_LOG` environment variable overrides [`level`](Self::level), with
-/// the usual `env_logger` syntax such as `RUST_LOG=debug,gilrs=warn`.
+/// the usual `env_logger` syntax such as `RUST_LOG=debug,gilrs=warn`. Without it, `wgpu`'s
+/// low-level backend logs only errors, which hides harmless driver chatter.
 #[derive(Debug, Clone, Copy)]
 pub struct LogPlugin {
     /// The most detailed level to show.
@@ -30,7 +31,8 @@ impl Plugin for LogPlugin {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn init(level: LevelFilter) {
-    let env = env_logger::Env::default().default_filter_or(level.as_str());
+    let filter = format!("{},wgpu_hal=error", level.as_str().to_lowercase());
+    let env = env_logger::Env::default().default_filter_or(filter);
     // A logger may already be installed, by a test harness for example; keep it.
     let _ = env_logger::Builder::from_env(env).try_init();
 }
