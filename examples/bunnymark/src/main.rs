@@ -46,7 +46,7 @@ struct Bunny {
     position: Vec2,
     previous: Vec2,
     velocity: Vec2,
-    texture: TextureId,
+    texture: AssetId<Image>,
 }
 
 /// A bunny's velocity in ECS mode; its position is its `Transform2D`.
@@ -60,7 +60,9 @@ struct Bunnies {
     /// Whether bunnies are entities (`--ecs`) rather than entries in `list`.
     ecs: bool,
     list: Vec<Bunny>,
-    textures: Vec<TextureId>,
+    /// The bunny images. Immediate-mode bunnies only hold ids, so these handles keep the
+    /// images loaded.
+    textures: Vec<Handle<Image>>,
     /// Bunnies created so far, to cycle through the textures.
     spawned: usize,
     /// Bunnies to create once the textures exist.
@@ -71,7 +73,7 @@ struct Bunnies {
 impl Bunnies {
     fn spawn(&mut self, commands: &mut Commands, at: Vec2, count: usize) {
         for _ in 0..count {
-            let texture = self.textures[self.spawned % self.textures.len()];
+            let texture = &self.textures[self.spawned % self.textures.len()];
             self.spawned += 1;
             let direction = if self.rng.next() < 0.5 { -1.0 } else { 1.0 };
             let velocity = vec2(
@@ -82,7 +84,7 @@ impl Bunnies {
                 commands.spawn((
                     Sprite {
                         pivot: vec2(0.5, 0.0),
-                        ..Sprite::new(texture)
+                        ..Sprite::new(texture.clone())
                     },
                     Transform2D::from_translation(at),
                     Interpolated::default(),
@@ -93,7 +95,7 @@ impl Bunnies {
                     position: at,
                     previous: at,
                     velocity,
-                    texture,
+                    texture: texture.id(),
                 });
             }
         }
@@ -162,11 +164,11 @@ fn main() {
         .run();
 }
 
-fn setup(mut commands: Commands, mut textures: ResMut<Textures>, mut bunnies: ResMut<Bunnies>) {
+fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut bunnies: ResMut<Bunnies>) {
     commands.spawn(Camera2D::default());
     for png in BUNNY_PNGS {
         let image = Image::from_png(png).expect("bunny PNGs are valid");
-        bunnies.textures.push(textures.add(image));
+        bunnies.textures.push(images.add(image));
     }
     // Scatter the starting bunnies over the arena.
     let count = core::mem::take(&mut bunnies.pending);
@@ -329,17 +331,23 @@ fn draw(
     mut debug: ResMut<DebugShapes>,
 ) {
     let alpha = time.alpha();
+    // Queue plain `QueuedSprite`s: they hold texture ids, so drawing tens of thousands
+    // touches no reference counts.
+    let feet = Sprite {
+        pivot: vec2(0.5, 0.0),
+        ..default()
+    };
+    let template = QueuedSprite::new(&feet, Affine2::IDENTITY, 0);
     for bunny in &bunnies.list {
-        let sprite = Sprite {
-            pivot: vec2(0.5, 0.0),
-            flip_x: bunny.velocity.x < 0.0,
-            ..Sprite::new(bunny.texture)
-        };
         let at = bunny.previous.lerp(bunny.position, alpha);
-        sprites.draw(
-            sprite,
-            Transform2D::from_translation(at).with_rotation(lean(bunny.velocity)),
-        );
+        sprites.push(QueuedSprite {
+            texture: bunny.texture,
+            flip_x: bunny.velocity.x < 0.0,
+            transform: Transform2D::from_translation(at)
+                .with_rotation(lean(bunny.velocity))
+                .affine(),
+            ..template
+        });
     }
 
     if debug.enabled() {

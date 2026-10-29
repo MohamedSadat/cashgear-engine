@@ -58,6 +58,11 @@ jobs:
           run cargo run -p bunnymark -- --frames 120
           run cargo run -p bunnymark -- --frames 120 --ecs
           run cargo run -p ecs_sprites -- --frames 480 --demo
+          run cargo run -p tiled_map -- --frames 360 --demo
+      - name: committed atlases are up to date
+        run: >-
+          cargo run -p cg_pack -- atlas examples/tiled_map/art/characters
+          examples/tiled_map/assets/atlases/characters.atlas.ron --check
       - name: reference images on failure
         if: failure()
         uses: actions/upload-artifact@v7

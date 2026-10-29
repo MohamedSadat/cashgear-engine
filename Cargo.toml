@@ -36,10 +36,14 @@ erased-serde = "0.4.11"
 gilrs = "0.11.2"
 glam = "0.34.1"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
+js-sys = "0.3.106"
 log = "0.4.34"
+notify = "8.2.1"
 pollster = "1.0.1"
 ron = "0.12.3"
 serde = { version = "1.0.229", features = ["derive"] }
+# TMX/TSX only; the default zstd feature is C code that does not build for wasm.
+tiled = { version = "0.16.0", default-features = false }
 wasm-bindgen = "0.2.129"
 wasm-bindgen-futures = "0.4.79"
 web-sys = "0.3.106"

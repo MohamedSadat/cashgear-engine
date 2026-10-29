@@ -1,12 +1,28 @@
-//! The [`Image`] type: pixels in memory.
+//! The [`Image`] asset: pixels in memory, and the PNG loader.
 
 use crate::Color;
+use cg_assets::{Asset, AssetLoader, BoxError, BoxedFuture, LoadContext};
 use cg_core::glam::UVec2;
 use core::fmt;
 
-/// Pixels in memory: 8-bit sRGB RGBA with straight alpha, rows from top to bottom.
+/// How a texture is sampled when it is drawn larger or smaller than its size.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Filter {
+    /// The nearest texel: crisp pixel art. The default.
+    #[default]
+    Nearest,
+    /// A blend of the four nearest texels: smooth art. Mipmaps are not generated.
+    Linear,
+}
+
+/// Pixels in memory: 8-bit sRGB RGBA with straight alpha, rows from top to bottom, and
+/// the [`Filter`] to draw them with.
 ///
-/// Add it to [`Textures`](crate::Textures) to draw it.
+/// Images are assets: load PNGs with `server.load("images/hero.png")`, or add images made
+/// in code to `Assets<Image>` (or, to name them by path, with
+/// [`AssetServer::add`](cg_assets::AssetServer::add)). The renderer uploads each image to
+/// the GPU when it appears or changes, and keeps the pixels in memory too, so a lost GPU
+/// can be restored.
 ///
 /// ```
 /// use cg_render::{Color, Image};
@@ -23,13 +39,17 @@ pub struct Image {
     width: u32,
     height: u32,
     data: Vec<u8>,
+    filter: Filter,
 }
+
+impl Asset for Image {}
 
 impl fmt::Debug for Image {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Image")
             .field("width", &self.width)
             .field("height", &self.height)
+            .field("filter", &self.filter)
             .finish_non_exhaustive()
     }
 }
@@ -51,6 +71,7 @@ impl Image {
             width,
             height,
             data,
+            filter: Filter::Nearest,
         })
     }
 
@@ -81,7 +102,25 @@ impl Image {
             width,
             height,
             data,
+            filter: Filter::Nearest,
         }
+    }
+
+    /// The image with another sampling filter.
+    pub fn with_filter(mut self, filter: Filter) -> Self {
+        self.filter = filter;
+        self
+    }
+
+    /// How the image is sampled when drawn: [`Filter::Nearest`] unless changed.
+    pub fn filter(&self) -> Filter {
+        self.filter
+    }
+
+    /// Changes how the image is sampled. On a loaded image, change it through
+    /// `Assets<Image>::get_mut`, so the renderer sees the change.
+    pub fn set_filter(&mut self, filter: Filter) {
+        self.filter = filter;
     }
 
     /// Decodes a PNG file. Every PNG colour type is converted to RGBA8.
@@ -170,6 +209,22 @@ impl fmt::Display for ImageError {
 }
 
 impl std::error::Error for ImageError {}
+
+/// Loads `.png` files as [`Image`]s with [`Filter::Nearest`]. `RenderPlugin` registers it.
+#[derive(Debug, Default)]
+pub struct ImageLoader;
+
+impl AssetLoader for ImageLoader {
+    type Asset = Image;
+
+    fn extensions(&self) -> &[&str] {
+        &["png"]
+    }
+
+    fn load<'a>(&'a self, ctx: &'a mut LoadContext) -> BoxedFuture<'a, Result<Image, BoxError>> {
+        Box::pin(async move { Ok(Image::from_png(ctx.bytes())?) })
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -3,7 +3,7 @@
 (
     components: {
         "Name": "player",
-        "Sprite": (texture: "bunny_brown", pivot: (0.5, 0)),
+        "Sprite": (texture: "images/bunny_brown.png", pivot: (0.5, 0)),
         "Layer": (3),
         "Interpolated": (),
         "Velocity": ((0, 0)),
@@ -13,7 +13,7 @@
         (components: {
             "Name": "player hat",
             "Transform2D": (translation: (1, 22)),
-            "Sprite": (texture: "hat", pivot: (0.5, 0), color: "#3a3f4b"),
+            "Sprite": (texture: "generated/hat", pivot: (0.5, 0), color: "#3a3f4b"),
             "Layer": (4),
         }),
     ],

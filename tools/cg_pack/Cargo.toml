@@ -10,6 +10,7 @@ publish.workspace = true
 
 [dependencies]
 cashgear_engine.workspace = true
+ron.workspace = true
 
 [lints]
 workspace = true

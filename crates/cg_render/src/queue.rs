@@ -3,23 +3,27 @@
 
 use crate::camera::pick_active;
 use crate::{
-    Camera2D, CameraView, InheritedVisibility, Layer, RenderStats, Sprite, Sprites, Textures,
+    Camera2D, CameraView, Image, InheritedVisibility, Layer, RenderStats, Sprite, Sprites,
 };
 use bevy_ecs::prelude::*;
+use cg_assets::Assets;
 use cg_core::Rect;
 use cg_core::glam::Affine2;
 use cg_platform::Window;
 use cg_world::{GlobalTransform2D, Interpolated, InterpolatedTransforms};
 
 /// The view the renderer draws this frame with, chosen from the active [`Camera2D`] by
-/// [`RenderSystems::Queue`].
+/// [`RenderSystems::View`].
 #[derive(Resource, Debug, Clone, Default, PartialEq)]
 pub struct FrameView(pub CameraView);
 
-/// System sets in the [`Render`](cg_core::Render) schedule.
+/// System sets in the [`Render`](cg_core::Render) schedule, in this order.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RenderSystems {
-    /// Picks the camera and queues the visible sprite entities.
+    /// Picks the active camera and sets the [`FrameView`].
+    View,
+    /// Queues the visible sprite entities. Systems that queue more sprites from the
+    /// [`FrameView`] (tilemaps, say) go here too, `.after(RenderSystems::View)`.
     Queue,
     /// Draws the queues into the window and empties them.
     Draw,
@@ -44,19 +48,16 @@ type CameraItem = (
     ),
 );
 
-/// Picks the active camera and queues every visible sprite entity that overlaps its view.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn queue_world(
+/// Picks the active camera and makes its view this frame's [`FrameView`].
+pub(crate) fn pick_camera(
     cameras: Query<CameraItem>,
-    sprites: Query<SpriteItem>,
     transforms: InterpolatedTransforms,
-    window: Res<Window>,
-    textures: Res<Textures>,
-    mut queue: ResMut<Sprites>,
     mut view: ResMut<FrameView>,
     mut stats: ResMut<RenderStats>,
     mut warned: Local<bool>,
 ) {
+    // The queueing systems after this one add to it.
+    stats.culled = 0;
     let (active, several) = pick_active(cameras.iter());
     if several && !*warned {
         *warned = true;
@@ -69,6 +70,18 @@ pub(crate) fn queue_world(
         ),
         None => CameraView::default(),
     };
+}
+
+/// Queues every visible sprite entity that overlaps the [`FrameView`].
+pub(crate) fn queue_world(
+    sprites: Query<SpriteItem>,
+    transforms: InterpolatedTransforms,
+    window: Res<Window>,
+    images: Res<Assets<Image>>,
+    view: Res<FrameView>,
+    mut queue: ResMut<Sprites>,
+    mut stats: ResMut<RenderStats>,
+) {
     let visible = view.0.visible_rect(&window);
 
     let mut culled = 0;
@@ -77,21 +90,21 @@ pub(crate) fn queue_world(
             continue;
         }
         let transform = transforms.blend(global.0, interpolated, parent);
-        let Some(bounds) = world_bounds(sprite, transform, &textures) else {
+        let Some(bounds) = world_bounds(sprite, transform, &images) else {
             continue;
         };
         if !bounds.overlaps(&visible) {
             culled += 1;
             continue;
         }
-        queue.draw_on(layer.map_or(0, |layer| layer.0), *sprite, transform);
+        queue.draw_on(layer.map_or(0, |layer| layer.0), sprite, transform);
     }
-    stats.culled = culled;
+    stats.add_culled(culled);
 }
 
 /// The world-space bounding box of a sprite drawn at `transform`.
-fn world_bounds(sprite: &Sprite, transform: Affine2, textures: &Textures) -> Option<Rect> {
-    let local = sprite.local_rect(textures)?;
+fn world_bounds(sprite: &Sprite, transform: Affine2, images: &Assets<Image>) -> Option<Rect> {
+    let local = sprite.local_rect(images)?;
     Rect::from_points(
         [
             local.min,
@@ -116,13 +129,13 @@ mod tests {
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(WorldPlugin)
-            .init_resource::<Textures>()
+            .init_resource::<Assets<Image>>()
             .init_resource::<Sprites>()
             .init_resource::<FrameView>()
             .init_resource::<RenderStats>()
             .insert_resource(Window::with_size(uvec2(640, 360), 1.0))
             .add_systems(cg_core::PostUpdate, crate::visibility::propagate_visibility)
-            .add_systems(Render, queue_world);
+            .add_systems(Render, (pick_camera, queue_world).chain());
         app
     }
 

@@ -10,8 +10,8 @@ This file tracks phase status, the decisions made at the start of each phase, kn
 | 1 | Platform layer and game loop | Done | `phase-1` |
 | 2 | Renderer core | Done | `phase-2` |
 | 3 | ECS and scenes | Done | `phase-3` |
-| 4 | Assets and tilemaps | Next | |
-| 5 | Collision and physics | Not started | |
+| 4 | Assets and tilemaps | Done | `phase-4` |
+| 5 | Collision and physics | Next | |
 | 6 | Animation and effects | Not started | |
 | 7 | Audio | Not started | |
 | 8 | Text and UI | Not started | |
@@ -207,33 +207,101 @@ Other choices made during the phase:
 - `cargo run -p bunnymark --release -- --ecs --no-vsync` against the same command without `--ecs`, to compare the ECS cost on your machine.
 - Web: `cd examples/ecs_sprites && trunk serve --port 8082`, then open <http://127.0.0.1:8082> (and `?demo`, `?backend=gl`).
 
+## Phase 4 — Assets and tilemaps
+
+### Decisions
+
+| Question | Answer |
+| --- | --- |
+| Tiled TMX or JSON | TMX and TSX, read by the `tiled` crate (0.16, without its zstd feature, which is C code and does not build for wasm). The crate reads files synchronously, so the loader serves it from memory: it parses, and whenever the parser asks for a file it does not have yet (a tileset, a template), it reads that file through the async asset IO and parses again. |
+| Asset folder layout | Each game or example has its own `assets/` folder; assets are named by `/`-separated paths inside it (`maps/level.tmx`). Desktop finds the folder through `CG_ASSET_ROOT`, then `assets` in `CARGO_MANIFEST_DIR` (set by `cargo run`), then next to the executable, then in the working directory. On the web, `trunk` copies `assets/` next to `index.html` and the engine fetches from there. |
+| Atlases at build time or runtime | Build time. `cg_pack atlas <folder> <out.atlas.ron>` writes the image and a RON file of named regions, and the outputs are committed. Packing is deterministic; `--check` fails when they are stale, and CI runs it. The runtime only loads atlases and looks regions up by name. |
+| Example art | Kenney's Pixel Platformer (CC0), downloaded by the user since kenney.nl has a bot check. Only the packed sheets, a hills strip composed from its background tiles, and character frames for the atlas are in the repository, with Kenney's license as `examples/tiled_map/assets/KENNEY-LICENSE.txt`. |
+
+Other choices made during the phase:
+
+- **Handles.** `Handle<T>` is a reference-counted strong handle or a weak one; `AssetId<T>` is an index and generation, `Copy` and eight bytes. Indices are reused with a new generation, so a stale id finds nothing. When the last strong handle drops, the asset is unloaded in the next asset update. The first 16 indices are reserved for assets at fixed ids; `AssetId::DEFAULT` is the white texture.
+- **Sprites hold handles.** `Sprite::texture` is a `Handle<Image>`, so a sprite keeps its image loaded and `Sprite` is no longer `Copy`. `QueuedSprite` holds the texture as an `AssetId` and the sprite's fields directly, so immediate-mode queues (bunnymark's 10,000+ bunnies, tile chunks) never touch reference counts.
+- **One asset update per frame.** `AssetServer::update` runs in `First`: it picks up changed files, starts queued loads, and stores finished ones in their `Assets<T>`. A load started any time appears in the next update, on every target. On desktop, files are read and decoded inside that update (a whole dependency tree usually loads in one frame); on the web, the fetches finish over later frames. Desktop loads block the frame while they run; see known issues.
+- **Async loaders.** `AssetLoader::load` returns a boxed (non-`Send`) future, so a loader can read more files through the `LoadContext` (the map loader reads tilesets) and load dependencies (`ctx.load`). Files read that way are recorded, so changing a tileset reloads the maps that use it.
+- **Load states.** `load_state` covers the asset alone; `recursive_load_state` and `is_loaded` include its dependencies (`Failed` if any failed). `LoadingAssets` holds strong handles to a group and reports `progress`; `add_loading_state(loading, next)` moves on when the group is done, even with failures (they are logged one by one, then summarised).
+- **Hot reload.** On by default in debug desktop builds (`--hot-reload` / `--no-hot-reload`). `notify` reports changes from its own thread inside `cg_platform`; a file counts as changed once it has been quiet for 100 ms, so an editor's several writes during one save reload once. A reload replaces the asset in place (same id, new version, `AssetEvent::Modified`); a failed reload logs the error and keeps the previous version. `AssetServer::reload(path)` does the same by hand on every target (the example's R key).
+- **CPU copies of images stay.** `Assets<Image>` keeps every image in memory after upload, so a lost GPU can re-upload. The renderer syncs uploads by version, like `Textures` did. Revisit in Phase 10/11 if memory matters.
+- **Images carry their filter.** `Image::filter` replaces the per-texture filter of `Textures`; change it on a loaded image through `Assets<Image>::get_mut`. There are no loader settings yet.
+- **Code-made assets by path.** `AssetServer::add(path, value)` stores an asset as if loaded from `path`, so prefabs can name art drawn in code (`ecs_sprites` registers `generated/hat` and friends).
+- **Prefabs as assets.** `app.load_prefab(name, path)` loads a `.prefab.ron`, adds it to `LoadingAssets` and copies it into `Prefabs` whenever it loads or changes; new spawns use the new version. Prefab `Sprite`s and `AtlasSprite`s name assets by path and load them through the server when spawned.
+- **Atlas sprites.** `AtlasSprite { atlas, region }` points the entity's `Sprite` at a region once the atlas loads, and again whenever the atlas or the region name changes, so animation by region name works (the example's `Frames`).
+- **Map coordinates.** A map's bottom-left corner sits at its entity's origin, one Tiled pixel per world unit, y up: Tiled's `(x, y)` is `(x, height_px - y)`. Rows are counted from the top as in Tiled. Tall tiles hang from the bottom-left of their cell, as Tiled draws them.
+- **Tile chunks.** Each visible tile layer is cut into 16×16-tile chunks of `QueuedSprite`s, built once per map version and culled whole against the view; visible chunks are copied into the sprite queue each frame with the map's transform and parallax applied. That is the "cached chunk" the plan asked for, at the CPU level: the 100×20-tile example queues about 320 tiles a frame. Tiled's flips (including diagonal ones) are folded into each tile's transform, so the batcher needs nothing new.
+- **Parallax.** A layer with factor `p` is shifted by `(1 - p) × (camera - parallax origin)`, measured in the map entity's space, as Tiled does. Image layers repeat to fill the view (at most 4096 copies a frame).
+- **Objects.** Each object becomes a child of the map entity with a `TiledObject` (id, name, class, layer, shape in world units, properties), a `Transform2D` (the centre of rectangles, ellipses and tile objects; Tiled's anchor otherwise; Tiled's clockwise degrees become counter-clockwise radians), a `Name` and a `Layer` (`base + layer index`). Tile objects get a `Sprite` of their tile. A tile object without a class takes its tile's class and properties.
+- **Objects and prefabs.** The class (or a `prefab` string property) names a prefab. If `Prefabs` has it, it is inserted into the object's entity, and the object's position and rotation are put back (the prefab's scale stays). Then each property named after a registered prefab component replaces that component: a class-typed property gives its members as fields, a string is read as RON (or as a string), and other values fill a one-field component such as `Layer(7)`.
+- **Rebuilds.** When a `Tilemap`'s map asset changes, its chunks are rebuilt and its objects despawned and spawned again, so objects lose any state they had. Objects are children of the map entity, so despawning the map despawns them.
+- **System order.** `cg_render` now picks the camera in `RenderSystems::View` before `RenderSystems::Queue`, so `cg_tiled` (and later crates) queue sprites from the `FrameView`. `RenderStats::culled` is reset in `View` and added to by each queueing system.
+- **Missing files on the web.** `trunk serve` answers unknown paths with the page itself (status 200), so an HTML answer for a file that is not HTML counts as not found, and errors read the same on every target.
+- **Versions.** notify 8.2.1 (9.0 is still a release candidate), tiled 0.16.0, js-sys 0.3.106 (web, for the fetched bytes).
+
+### Done
+
+- `cg_platform`: `io::AssetIo` (filesystem, `fetch`, an Android stub until Phase 11), `io::FileWatcher`, `io::IoError`.
+- `cg_assets`: `AssetServer`, `Handle`, `AssetId`, `UntypedHandle`, `UntypedAssetId`, `Assets`, `AssetEvent`, `AssetLoader`, `LoadContext`, `AssetError`, `LoadState`, `LoadingAssets`, `LoadProgress`, `PrefabSource`, `PrefabLoader`, `PrefabFiles`, `AssetPlugin`, `AppAssetExt`, `AssetSystems` and the `path` helpers.
+- `cg_render`: `Image` as an asset with `ImageLoader` and `Filter`; `TextureAtlas`, `AtlasFile`, `AtlasRegion`, `AtlasLoader`, `AtlasSprite`; `RenderSystems::View`; `RenderStats::add_culled`. `Textures` and `TextureId` are gone.
+- `cg_tiled`: `TiledMap` and its parts (`Tileset`, `TileInfo`, `MapLayer`, `LayerKind`, `TileLayer`, `LayerTile`, `ImageLayer`, `MapObject`, `ObjectShape`, `Properties`, `PropertyValue`), `TmxLoader`, `Tilemap`, `TilemapState`, `TiledObject`, `TiledPlugin`.
+- `tools/cg_pack`: `cg_pack atlas` with `--padding`, `--extrude`, `--max-size` and `--check`.
+- `cashgear_engine`: `DefaultPlugins` adds `AssetPlugin` (with `--hot-reload`, `--no-hot-reload`, `--asset-root`, `--asset-delay`) and `TiledPlugin`.
+- `examples/tiled_map` (new, with a trunk page) and `ecs_sprites` (now loading from `assets/` through a `Loading` state); `bunnymark` and `hello_window` ported.
+- 201 tests (48 more than Phase 3), including integration tests over real asset folders; the reference PNGs are unchanged.
+- CI: `tiled_map --frames 360 --demo` and the atlas `--check`.
+
+### Verified
+
+- All tests, including the golden images, pass on Vulkan (GTX 1650) and on WARP (software Direct3D 12).
+- Desktop (Windows, Vulkan), `tiled_map --demo`: the level (619 tiles in 29 chunks, 53 objects) loads in the first frame and holds 60 fps with vsync, about 320 sprites in 4 draw calls with 340 to 380 tiles culled. The demo's reload rebuilds the level.
+- Hot reload on desktop, with the example running: saving the map file (a changed title) rebuilt the level within a frame of the 100 ms quiet time; saving the tileset (a changed tile property) reloaded the map through it; saving a broken map logged `could not load maps/level.tmx: Document ended before root element <map> was found; keeping the version loaded before` and the level stayed; restoring the files rebuilt it again.
+- Web (`trunk serve`, the app's browser pane, debug wasm), checked by screenshot: the level with parallax hills and clouds, coin arcs, animated slimes, aliens and bats, and decorations, on WebGPU and on WebGL2 (`?backend=gl`), at 60 fps. Every asset arrives over `fetch`. `?asset-delay=3` shows the loading bar, then the level. Pressing R re-fetches and rebuilds the map. A missing prefab reports `not found`.
+- Not checked by me: the desktop window by screenshot (I checked the desktop through logs, and the picture on the web, which runs the same code), editing in the Tiled application itself (I edited the files from a script), keyboard and gamepad scrolling. See the manual checks.
+
+### Manual checks for the user
+
+- Desktop: `cargo run -p tiled_map`. The level scrolls by itself; arrows or A/D take over, Space toggles auto-scroll. The hills should scroll slowest, the clouds a little faster, the ground with the camera. Coins bob, slimes, aliens and the pink alien walk back and forth and face where they walk, bats flap.
+- Live editing: with the example running, open `examples/tiled_map/assets/maps/level.tmx` in Tiled (1.10 or later), move a platform or add tiles and save. The level should rebuild in place; the terminal logs `rebuilt maps/level.tmx`. Then change a `Patrol` property on an enemy (its speed) and save.
+- `cargo run -p tiled_map -- --asset-delay 1` shows the loading bar on desktop.
+- `cargo run -p ecs_sprites`: the same game as in Phase 3, now loading its prefabs and images from `assets/`. Editing `examples/ecs_sprites/assets/prefabs/bunny.prefab.ron` (the hat colour, say) while it runs changes the bunnies spawned after the save.
+- Web: `cd examples/tiled_map && trunk serve --port 8083`, then open <http://127.0.0.1:8083> (and `?backend=gl`, `?asset-delay=2`).
+
 ## Known issues
 
 - On the web, `AppExit` stops the loop but leaves the page; there is nowhere to exit to.
 - Within one layer, sprites are grouped by texture, so overlapping sprites with different textures draw in texture order, not queue or spawn order. Use `Layer` when the order matters. A z or y-sort key can be added if the platformer needs one.
 - Moving an `Interpolated` entity in `Update` instead of `FixedUpdate` draws it blended between its last fixed-step position and the new one. Move interpolated entities in fixed steps, or call `Interpolated::reset`.
 - A child whose parent has no `Transform2D` keeps a stale `GlobalTransform2D`. Give every parent in a hierarchy a transform.
-- Prefab files are embedded with `include_str!` and parsed on first spawn; there is no file loading or hot reload until Phase 4.
 - `MainCamera` uses the camera's un-interpolated transform, so pointer picking can be off by up to one fixed step of camera motion.
-- `Textures` keeps every image in CPU memory as well as on the GPU, so a lost device can re-upload. Phase 4's asset server should decide whether to drop CPU copies.
+- `Assets<Image>` keeps every image in CPU memory as well as on the GPU, so a lost device can re-upload.
+- On desktop, files are read and decoded on the main thread inside the asset update, so a large asset makes that frame long. A worker thread for desktop loads can come with the Phase 14 performance pass.
+- An example's executable run directly (not through `cargo run`) finds its assets only if they are next to it or `CG_ASSET_ROOT` points at them.
+- Hot-reloading a map respawns its objects, so they lose their state; hot-reloading a prefab changes only entities spawned afterwards.
+- `cg_tiled` supports orthogonal maps with single-image tilesets. Image-collection tilesets draw nothing (with a warning); tile animations, isometric and hexagonal maps, and text objects (spawned as plain rectangles) are not supported yet.
+- Tilemaps are drawn at their entity's `GlobalTransform2D` without interpolation, so a map moved in fixed steps would step on fast displays. Maps normally stay put.
+- Tile chunks are cached as queued sprites on the CPU and copied into the sprite queue each frame, not kept as GPU buffers. At the example's size that is about 320 tiles a frame; revisit if a level gets much larger.
 - Browsers hide the adapter name behind WebGPU, so `RenderStats::adapter()` reads "an unnamed GPU" there.
 - With 20,000 bunnies in a debug wasm build, WebGL2 drops to 30 fps. A release web build is Phase 10's job.
 
 ## Notes for later phases
 
-- **Phase 4:** textures should come from the asset server as `Handle<Image>`; `Textures` and `TextureId` can become the GPU side of it. `Image::from_png` is the decode step to reuse. `trunk` only watches the example folder, so touch the example after editing engine crates while `trunk serve` runs.
-- **Phase 4:** prefabs become assets. `Prefabs::add_ron` and lazy parsing are the hook: load the text through the asset IO, then re-parse on change for hot reload. `SpriteData::texture` turns from a texture name into an asset path, resolved in `PrefabComponent::from_data` (which already gets the `World`).
-- **Phase 4:** Tiled object layers can spawn entities by type through the same `PrefabRegistry`: map a Tiled class to a prefab name and custom properties to component fields.
-- **Phase 4:** tile layers should not be one entity per tile; draw cached chunk meshes or queue chunks straight into `Sprites`. The ground in `ecs_sprites` is 80 entities, which is fine there but would not scale to a level.
+- **Any phase:** `trunk` only watches the example folder, so touch the example after editing engine crates while `trunk serve` runs.
 - **Phase 5:** physics should run in `FixedUpdate` on `Transform2D` and use `Interpolated` for drawing. Order collision before `TransformSystems::Propagate` in `FixedPostUpdate`, or read `Transform2D` directly.
+- **Phase 5:** tile collision can read the map through the entity's `Tilemap` handle: `TiledMap::tile(layer, cell)`, `tile_info(tile).properties` and `world_to_tile` / `tile_to_world` (map-local; apply the map entity's transform). `examples/tiled_map`'s tileset already marks `solid`, `one_way` and `hazard` tiles (and a 22.5°/45° slope set would need tiles marked the same way). `TiledObject::shape` gives object colliders in world units.
+- **Phase 5:** `examples/tiled_map` has a `PlayerStart` point and a `Goal`, so the collision example can reuse its level.
 - **Phase 6:** camera follow, shake and zoom tweens should move the camera entity in `FixedUpdate` with `Interpolated`, as `ecs_sprites` does.
 - **Phase 13:** add `bevy_reflect` derives for the inspector; keep serde for prefab files. `Prefab::to_ron` already writes prefabs, but capturing a live entity back into a prefab still needs a `to_data` direction on `PrefabComponent`.
+- **Phase 6:** Aseprite JSON can be an `AssetLoader` producing an atlas-like asset (frames are regions); `tiled_map`'s `Frames` component (cycling `AtlasSprite::region`) is a stand-in until real clips. Tiled tile animations belong there too.
 - **Phase 6:** particles can reuse the sprite batcher (white texture, tint). Flash-on-hit and outline effects need a second sprite pipeline or a shader parameter in the instance data.
 - **Phase 8:** egui will need its own pass after the debug shapes. `Painter::render` is the place to add it.
 - **Phase 10:** measure a release wasm build (`trunk build --release`, `wasm-opt`). The debug wasm is about 10 MB.
 - **Phase 8:** on-screen buttons can press actions through a new `Binding` variant or by driving `ScreenRegion` touches.
-- **Phase 7:** `kira` (via `cpal`) needs `libasound2-dev` on Ubuntu CI.
-- **Phase 11:** add `aarch64-linux-android` to `rust-toolchain.toml` targets and a CI job.
+- **Phase 7:** `kira` (via `cpal`) needs `libasound2-dev` on Ubuntu CI. Sounds should be assets (`Handle<Sound>` with an OGG/WAV loader) through the asset server.
+- **Phase 9:** the Kenney Pixel Platformer sheets and license are in `examples/tiled_map/assets`; the scratch generator that built the level is not in the repository, so new levels are made in Tiled.
+- **Phase 11:** add `aarch64-linux-android` to `rust-toolchain.toml` targets and a CI job. Fill in the Android branch of `cg_platform::io` (APK assets through `android-activity`'s asset manager); file watching stays desktop-only.
 - **Phase 12:** `cg_script` will not build for wasm; keep it out of `check-wasm` or behind the `script` feature.
 
 ## Backlog
@@ -243,3 +311,6 @@ Features that came up but don't serve the platformer or a listed example go here
 - Several cameras drawn at once (split screen, minimap), each with its own viewport and order.
 - A z or y-sort key within a layer.
 - Multi-threaded system execution on desktop, if profiling ever calls for it. At 10,000 entities the ECS work is about 0.6 ms a frame single-threaded.
+- Packing atlases at runtime (Phase 4 packs them with `cg_pack`), and per-load loader settings (an image's filter, say).
+- Image-collection tilesets, tile animations, and isometric or hexagonal maps in `cg_tiled`.
+- Asset bundling in `cg_pack` (the plan's other `cg_pack` job) is Phase 10's.

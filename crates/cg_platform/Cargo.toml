@@ -23,12 +23,17 @@ winit = { workspace = true, features = ["serde"] }
 env_logger.workspace = true
 pollster.workspace = true
 
+# Hot reloading watches the asset folder; Android reads from the APK instead.
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "android")))'.dependencies]
+notify.workspace = true
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook.workspace = true
 console_log.workspace = true
+js-sys.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
-web-sys = { workspace = true, features = ["Document", "Element", "HtmlCanvasElement", "HtmlElement", "Location", "Window"] }
+web-sys = { workspace = true, features = ["Document", "Element", "Headers", "HtmlCanvasElement", "HtmlElement", "Location", "Response", "Window"] }
 
 [dev-dependencies]
 ron.workspace = true

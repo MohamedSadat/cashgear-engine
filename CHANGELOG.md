@@ -3,6 +3,35 @@
 All notable changes to CashGear Engine are recorded here, one section per phase.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Phase 4 — Assets and tilemaps
+
+### Added
+
+- `cg_platform`: `io::AssetIo`, which reads files by `/`-separated path from the asset folder on desktop, with `fetch` on the web, and (from Phase 11) from the APK on Android, through one `async` API. The folder is `CG_ASSET_ROOT`, else `assets` in the crate run by `cargo run`, else next to the executable; on the web, `assets/` next to the page. `io::FileWatcher` reports changed files on desktop (`notify` 8.2.1).
+- `cg_assets`: the `AssetServer` (`load`, `add`, `reload`, load states, errors with the path and reason), reference-counted `Handle<T>`s and copyable `AssetId<T>`s, `Assets<T>` collections with versions and `AssetEvent<T>` messages, and `async` `AssetLoader`s whose `LoadContext` reads further files and loads dependencies. Assets unload when their last strong handle drops.
+- `cg_assets`: hot reloading on desktop (on by default in debug builds): a changed file reloads every asset made from it or that read it while loading; a failed reload keeps the previous version.
+- `cg_assets`: `LoadingAssets` groups with `progress`, and `add_loading_state(loading, next)`, which moves on once the group has loaded. `--asset-delay <seconds>` holds loads back to try loading screens.
+- `cg_assets`: prefab files as assets. `app.load_prefab(name, path)` loads a `.prefab.ron` file into `Prefabs` and reloads it when it changes.
+- `cg_assets`: `AssetPlugin`, `AppAssetExt` (`init_asset`, `register_loader`, `load_prefab`, `add_loading_state`) and the `path` helpers.
+- `cg_render`: `Image` is an asset with its own `Filter`, loaded from PNG by `ImageLoader`; `AssetId::DEFAULT` is the built-in white texture.
+- `cg_render`: texture atlases. `TextureAtlas` assets load from `.atlas.ron` files (`AtlasFile`) with their image as a dependency; `AtlasSprite` draws a named region on an entity and follows changes to the atlas or the region name.
+- `cg_render`: `RenderSystems::View` (camera picking) before `RenderSystems::Queue`, so other crates can queue sprites from the `FrameView`; `RenderStats::add_culled`; `QueuedSprite::new`.
+- `cg_tiled`: `TiledMap` assets loaded from `.tmx` with `.tsx` tilesets and `.tx` templates through the asset IO (`TmxLoader`, on the `tiled` 0.16 crate). Tile, image, object and group layers, flips, layer offsets, opacity, tint and parallax, custom properties (classes included) on maps, layers, tilesets, tiles and objects, finite and infinite maps.
+- `cg_tiled`: the `Tilemap` component. Tile layers are cut into 16×16-tile chunks, built once and culled whole; image layers repeat to fill the view; parallax layers scroll at their own speed. Objects spawn as child entities with a `TiledObject`, sprites for tile objects, the prefab their class names, and components set from properties named after them. Changed maps rebuild in place.
+- `tools/cg_pack`: `cg_pack atlas <folder> <out.atlas.ron>` packs a folder of PNGs into an atlas image and RON file, deterministically, with `--padding`, `--extrude`, `--max-size` and `--check`.
+- `examples/tiled_map`: a Kenney Pixel Platformer level made in Tiled, with a loading bar, a scrolling camera, parallax hills and clouds, bobbing coin prefabs, enemies animated from a packed atlas and tuned by Tiled class properties, tile properties for Phase 5, and live editing.
+- CI: `tiled_map --frames 360 --demo` and `cg_pack atlas ... --check`.
+
+### Changed
+
+- `Sprite::texture` is a `Handle<Image>`, so `Sprite` is `Clone` but no longer `Copy`. The `Textures` store and `TextureId` are gone: images live in `Assets<Image>`, added with `images.add(image)` or loaded with `server.load("x.png")`.
+- `QueuedSprite` holds the sprite's fields directly, with the texture as an `AssetId<Image>`, so queueing touches no reference counts. `Sprites::draw` and `draw_on` take `&Sprite`.
+- Prefab `Sprite`s name their texture by asset path (`texture: "images/bunny.png"`), loaded when the prefab spawns.
+- `OffscreenRenderer::render` takes `&Assets<Image>`.
+- `DefaultPlugins` adds `AssetPlugin` (with the asset launch flags) and `TiledPlugin`; the prelude includes the asset and Tiled items.
+- `examples/ecs_sprites` loads its prefabs and bunny images from `assets/` through a `Loading` state, and registers the art it draws in code under `generated/...` paths. `examples/bunnymark` keeps its images in `Assets<Image>` and queues `QueuedSprite`s directly.
+- New dependencies: `notify` 8.2.1 (desktop), `js-sys` 0.3.106 (web), `tiled` 0.16.0 (without its zstd feature, so it builds for wasm).
+
 ## Phase 3 — ECS and scenes
 
 ### Added

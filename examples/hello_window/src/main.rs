@@ -228,13 +228,13 @@ fn draw(
             pivot: vec2(0.0, 1.0),
             ..Sprite::solid(Color::hex(color), vec2(stripe, 48.0))
         };
-        sprites.draw(tile, Transform2D::from_xy(i as f32 * stripe, 0.0));
+        sprites.draw(&tile, Transform2D::from_xy(i as f32 * stripe, 0.0));
     }
     let player = Sprite {
         pivot: vec2(0.5, 0.0),
         ..Sprite::solid(Color::hex(0xffbe0b), vec2(16.0, 24.0))
     };
-    sprites.draw_on(1, player, Transform2D::from_translation(drawn));
+    sprites.draw_on(1, &player, Transform2D::from_translation(drawn));
 }
 
 fn quit(actions: Res<ActionState>, mut exit: MessageWriter<AppExit>) {

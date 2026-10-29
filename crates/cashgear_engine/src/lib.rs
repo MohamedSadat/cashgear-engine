@@ -42,22 +42,25 @@ pub use cg_tiled as tiled;
 pub use cg_ui as ui;
 pub use cg_world as world;
 
+use cg_assets::AssetPlugin;
 use cg_core::{App, FrameLimitPlugin, Plugin};
 use cg_platform::input::InputPlugin;
 use cg_platform::{Args, LogPlugin, WindowConfig, WindowPlugin};
 use cg_render::RenderPlugin;
+use cg_tiled::TiledPlugin;
 use cg_world::WorldPlugin;
 
 /// The engine version, taken from the crate manifest.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The standard set of plugins for a game: logging, the `--frames N` flag, input, the
-/// world (transforms, interpolation, prefabs), the window with its runner, and the
-/// renderer.
+/// world (transforms, interpolation, prefabs), assets, the window with its runner, the
+/// renderer and Tiled maps.
 ///
 /// Launch flags work on desktop and, as a query string (`?frames=60&backend=gl`), on the
 /// web: `--frames N` exits after N frames, `--no-vsync` and `--backend <list>` configure
-/// the renderer.
+/// the renderer, and `--hot-reload`, `--no-hot-reload`, `--asset-root <path>` and
+/// `--asset-delay <seconds>` the assets.
 ///
 /// Configure it with struct-update syntax:
 ///
@@ -80,6 +83,8 @@ pub struct DefaultPlugins {
     pub log: LogPlugin,
     /// Renderer settings. The `--no-vsync` and `--backend` flags override them.
     pub render: RenderPlugin,
+    /// Asset settings. The asset flags override them.
+    pub assets: AssetPlugin,
 }
 
 impl Plugin for DefaultPlugins {
@@ -91,20 +96,25 @@ impl Plugin for DefaultPlugins {
             })
             .add_plugins(InputPlugin::default())
             .add_plugins(WorldPlugin)
+            .add_plugins(self.assets.clone().with_args(&args))
             .add_plugins(WindowPlugin {
                 window: self.window.clone(),
             })
-            .add_plugins(self.render.clone().with_args(&args));
+            .add_plugins(self.render.clone().with_args(&args))
+            .add_plugins(TiledPlugin);
     }
 }
 
 /// Common imports for game code: the app and plugins, schedules, time, the ECS, `glam`
-/// vectors, logging macros, the window, input, transforms, states, prefabs and rendering.
+/// vectors, logging macros, the window, input, transforms, states, prefabs, assets,
+/// rendering and Tiled maps.
 pub mod prelude {
     pub use crate::DefaultPlugins;
+    pub use cg_assets::prelude::*;
     pub use cg_core::prelude::*;
     pub use cg_platform::prelude::*;
     pub use cg_render::prelude::*;
+    pub use cg_tiled::prelude::*;
     pub use cg_world::prelude::*;
 }
 

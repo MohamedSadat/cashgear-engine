@@ -10,11 +10,14 @@
 //! | [`WindowPlugin`] | The window, its [`WindowHandle`], [`Lifecycle`] messages and the runner that drives frames |
 //!
 //! [`tasks::spawn_local`] runs async work (such as GPU setup) without threads, and [`Args`]
-//! reads launch flags from the command line or the page URL. Asset IO and storage arrive in
-//! later phases.
+//! reads launch flags from the command line or the page URL. [`io::AssetIo`] reads game
+//! files from disk, over `fetch` or (from Phase 11) from the APK, and [`io::FileWatcher`]
+//! reports changed files on desktop for hot reloading. Save storage arrives in a later
+//! phase.
 
 mod args;
 pub mod input;
+pub mod io;
 mod log;
 mod runner;
 pub mod tasks;

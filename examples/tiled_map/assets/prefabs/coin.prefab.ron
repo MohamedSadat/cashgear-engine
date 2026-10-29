@@ -1,0 +1,7 @@
+// A coin: a tile object in the map; this adds the bobbing.
+(
+    components: {
+        "Coin": (),
+        "Bob": (height: 2, speed: 3),
+    },
+)

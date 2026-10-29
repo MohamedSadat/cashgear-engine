@@ -1,10 +1,11 @@
 //! Sprites: the [`Sprite`] component, the [`Layer`] component, and the per-frame
 //! [`Sprites`] queue for immediate-mode drawing.
 
-use crate::{Color, TextureId, Textures, Visibility};
+use crate::{Color, Image, Visibility};
 use bevy_ecs::prelude::*;
+use cg_assets::{AssetId, AssetServer, Assets, Handle};
 use cg_core::Rect;
-use cg_core::glam::{Affine2, Vec2};
+use cg_core::glam::{Affine2, UVec2, Vec2};
 use cg_world::{PrefabComponent, Transform2D};
 use serde::{Deserialize, Serialize};
 
@@ -15,34 +16,41 @@ use serde::{Deserialize, Serialize};
 /// [`Layer`], unless its [`Visibility`] hides it or it is outside the camera's view.
 /// Adding a `Sprite` also adds a [`Transform2D`] and a [`Visibility`].
 ///
+/// The texture is a [`Handle<Image>`], which keeps the image loaded while the sprite
+/// exists. Until the image has loaded the sprite draws nothing. The default handle is a
+/// 1×1 white texture, for solid rectangles.
+///
 /// ```
+/// use cg_assets::AssetServer;
 /// use cg_core::prelude::*;
-/// use cg_render::{Color, Layer, Sprite, TextureId};
+/// use cg_render::{Color, Layer, Sprite};
 /// use cg_world::Transform2D;
 ///
-/// fn spawn_player(mut commands: Commands) {
+/// fn spawn_player(mut commands: Commands, server: Res<AssetServer>) {
 ///     commands.spawn((
 ///         Sprite {
-///             size: Some(vec2(16.0, 24.0)),
 ///             pivot: vec2(0.5, 0.0), // feet
-///             color: Color::hex(0x3a86ff),
-///             ..Sprite::new(TextureId::WHITE)
+///             ..Sprite::new(server.load("images/player.png"))
 ///         },
 ///         Transform2D::from_xy(100.0, 20.0),
 ///         Layer(1),
+///     ));
+///     commands.spawn((
+///         Sprite::solid(Color::hex(0x3a86ff), vec2(16.0, 24.0)),
+///         Transform2D::from_xy(140.0, 20.0),
 ///     ));
 /// }
 /// ```
 ///
 /// For immediate-mode drawing without entities, queue it in [`Sprites`] instead.
 ///
-/// In prefabs the texture is named (see [`Textures::add_named`]) and every field is
-/// optional: `"Sprite": (texture: "bunny", pivot: (0.5, 0), color: "#ffcc00")`.
-#[derive(Component, Debug, Clone, Copy, PartialEq)]
+/// In prefabs the texture is an asset path and every field is optional:
+/// `"Sprite": (texture: "images/bunny.png", pivot: (0.5, 0), color: "#ffcc00")`.
+#[derive(Component, Debug, Clone, PartialEq)]
 #[require(Transform2D, Visibility)]
 pub struct Sprite {
     /// The texture to draw from.
-    pub texture: TextureId,
+    pub texture: Handle<Image>,
     /// Size in world units before the transform's scale. `None` uses the source
     /// rectangle's size in texels, so one texel is one world unit.
     pub size: Option<Vec2>,
@@ -63,7 +71,7 @@ pub struct Sprite {
 impl Default for Sprite {
     fn default() -> Self {
         Self {
-            texture: TextureId::WHITE,
+            texture: Handle::default(),
             size: None,
             source: None,
             pivot: Vec2::splat(0.5),
@@ -76,7 +84,7 @@ impl Default for Sprite {
 
 impl Sprite {
     /// A sprite showing all of `texture`.
-    pub fn new(texture: TextureId) -> Self {
+    pub fn new(texture: Handle<Image>) -> Self {
         Self {
             texture,
             ..Self::default()
@@ -92,33 +100,30 @@ impl Sprite {
         }
     }
 
-    /// The source rectangle in texels and the size in world units, or `None` if the
-    /// texture is missing.
-    pub(crate) fn source_and_size(&self, textures: &Textures) -> Option<(Rect, Vec2)> {
-        let texture_size = textures.size(self.texture)?.as_vec2();
-        let source = self
-            .source
-            .unwrap_or_else(|| Rect::from_min_size(Vec2::ZERO, texture_size));
-        let size = self.size.unwrap_or_else(|| source.size().abs());
-        Some((source, size))
-    }
-
     /// The quad in the sprite's local space, before its transform: `size` placed so the
-    /// pivot is at the origin. `None` if the texture is missing.
-    pub fn local_rect(&self, textures: &Textures) -> Option<Rect> {
-        let (_, size) = self.source_and_size(textures)?;
-        let corner = -self.pivot * size;
-        Some(Rect::from_corners(corner, corner + size))
+    /// pivot is at the origin. `None` until the texture has loaded.
+    pub fn local_rect(&self, images: &Assets<Image>) -> Option<Rect> {
+        QueuedSprite::new(self, Affine2::IDENTITY, 0).local_rect(images)
     }
 }
 
-/// The prefab form of a [`Sprite`]: the same fields, with the texture given by name.
+/// The size of a texture, counting the built-in white texture at [`AssetId::DEFAULT`].
+pub(crate) fn texture_size(images: &Assets<Image>, id: AssetId<Image>) -> Option<UVec2> {
+    images
+        .get(id)
+        .map(Image::size)
+        .or_else(|| (id == AssetId::DEFAULT).then_some(UVec2::ONE))
+}
+
+/// The prefab form of a [`Sprite`]: the same fields, with the texture given by its asset
+/// path.
 ///
-/// An empty or missing texture name means [`TextureId::WHITE`].
+/// An empty or missing texture means the white texture.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SpriteData {
-    /// The texture's name in [`Textures`].
+    /// The texture's asset path, such as `images/bunny.png`, loaded through the
+    /// [`AssetServer`] when the prefab is spawned.
     pub texture: String,
     /// See [`Sprite::size`].
     pub size: Option<Vec2>,
@@ -154,12 +159,12 @@ impl PrefabComponent for Sprite {
 
     fn from_data(data: &SpriteData, world: &World) -> Result<Self, String> {
         let texture = if data.texture.is_empty() {
-            TextureId::WHITE
+            Handle::default()
         } else {
             world
-                .get_resource::<Textures>()
-                .and_then(|textures| textures.named(&data.texture))
-                .ok_or_else(|| format!("no texture called `{}`", data.texture))?
+                .get_resource::<AssetServer>()
+                .ok_or_else(|| format!("no asset server to load `{}`", data.texture))?
+                .load(data.texture.as_str())
         };
         Ok(Self {
             texture,
@@ -196,21 +201,72 @@ impl PrefabComponent for Sprite {
 )]
 pub struct Layer(pub i32);
 
-/// One sprite in the [`Sprites`] queue: its look, where it goes and its layer.
+/// One sprite in the [`Sprites`] queue: a [`Sprite`]'s look with its texture as an id,
+/// where it goes and its layer. It is `Copy`, so queueing never touches reference counts;
+/// whoever queues it keeps the texture loaded.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct QueuedSprite {
-    /// What to draw.
-    pub sprite: Sprite,
+    /// The texture to draw from.
+    pub texture: AssetId<Image>,
+    /// See [`Sprite::size`].
+    pub size: Option<Vec2>,
+    /// See [`Sprite::source`].
+    pub source: Option<Rect>,
+    /// See [`Sprite::pivot`].
+    pub pivot: Vec2,
+    /// See [`Sprite::color`].
+    pub color: Color,
+    /// See [`Sprite::flip_x`].
+    pub flip_x: bool,
+    /// See [`Sprite::flip_y`].
+    pub flip_y: bool,
     /// Where: the world transform the sprite's local quad is mapped through.
     pub transform: Affine2,
     /// Draw order; see [`Layer`].
     pub layer: i32,
 }
 
+impl QueuedSprite {
+    /// `sprite` at `transform` on `layer`.
+    pub fn new(sprite: &Sprite, transform: impl Into<Affine2>, layer: i32) -> Self {
+        Self {
+            texture: sprite.texture.id(),
+            size: sprite.size,
+            source: sprite.source,
+            pivot: sprite.pivot,
+            color: sprite.color,
+            flip_x: sprite.flip_x,
+            flip_y: sprite.flip_y,
+            transform: transform.into(),
+            layer,
+        }
+    }
+
+    /// The source rectangle in texels and the size in world units, or `None` if the
+    /// texture is missing.
+    pub(crate) fn source_and_size(&self, images: &Assets<Image>) -> Option<(Rect, Vec2)> {
+        let texture_size = texture_size(images, self.texture)?.as_vec2();
+        let source = self
+            .source
+            .unwrap_or_else(|| Rect::from_min_size(Vec2::ZERO, texture_size));
+        let size = self.size.unwrap_or_else(|| source.size().abs());
+        Some((source, size))
+    }
+
+    /// The quad in local space, before the transform; see [`Sprite::local_rect`].
+    pub fn local_rect(&self, images: &Assets<Image>) -> Option<Rect> {
+        let (_, size) = self.source_and_size(images)?;
+        let corner = -self.pivot * size;
+        Some(Rect::from_corners(corner, corner + size))
+    }
+}
+
 /// The sprites to draw this frame, for immediate-mode drawing.
 ///
 /// Systems queue sprites any time before [`Render`](cg_core::Render); the renderer adds the
-/// visible [`Sprite`] entities, draws everything, then empties the queue.
+/// visible [`Sprite`] entities, draws everything, then empties the queue. The queue holds
+/// texture ids, not handles: keep the handles somewhere (a resource, say) for as long as
+/// you draw with them.
 ///
 /// ```
 /// use cg_core::prelude::*;
@@ -219,8 +275,8 @@ pub struct QueuedSprite {
 ///
 /// fn draw(mut sprites: ResMut<Sprites>) {
 ///     let square = Sprite::solid(Color::hex(0xffbe0b), vec2(32.0, 32.0));
-///     sprites.draw(square, Transform2D::from_xy(0.0, 0.0));
-///     sprites.draw_on(2, square, Transform2D::from_xy(40.0, 0.0).with_rotation(0.5));
+///     sprites.draw(&square, Transform2D::from_xy(0.0, 0.0));
+///     sprites.draw_on(2, &square, Transform2D::from_xy(40.0, 0.0).with_rotation(0.5));
 /// }
 /// ```
 #[derive(Resource, Debug, Default)]
@@ -231,17 +287,13 @@ pub struct Sprites {
 impl Sprites {
     /// Queues a sprite on layer 0. The transform is a [`Transform2D`], a
     /// [`GlobalTransform2D`](cg_world::GlobalTransform2D) or an [`Affine2`].
-    pub fn draw(&mut self, sprite: Sprite, transform: impl Into<Affine2>) {
+    pub fn draw(&mut self, sprite: &Sprite, transform: impl Into<Affine2>) {
         self.draw_on(0, sprite, transform);
     }
 
     /// Queues a sprite on a layer.
-    pub fn draw_on(&mut self, layer: i32, sprite: Sprite, transform: impl Into<Affine2>) {
-        self.queue.push(QueuedSprite {
-            sprite,
-            transform: transform.into(),
-            layer,
-        });
+    pub fn draw_on(&mut self, layer: i32, sprite: &Sprite, transform: impl Into<Affine2>) {
+        self.queue.push(QueuedSprite::new(sprite, transform, layer));
     }
 
     /// Queues a sprite.
@@ -279,62 +331,63 @@ impl Extend<QueuedSprite> for Sprites {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Image;
+    use cg_assets::{AppAssetExt, AssetPlugin};
     use cg_core::glam::vec2;
 
     #[test]
     fn local_rect_follows_size_and_pivot() {
-        let mut textures = Textures::default();
-        let tall = textures.add(Image::filled(4, 8, Color::RED));
+        let mut images = Assets::<Image>::default();
+        let tall = images.add(Image::filled(4, 8, Color::RED));
         let sprite = Sprite {
             pivot: vec2(0.5, 0.0),
-            ..Sprite::new(tall)
+            ..Sprite::new(tall.clone())
         };
         assert_eq!(
-            sprite.local_rect(&textures),
+            sprite.local_rect(&images),
             Some(Rect::new(-2.0, 0.0, 2.0, 8.0))
         );
         let sized = Sprite::solid(Color::RED, vec2(10.0, 2.0));
         assert_eq!(
-            sized.local_rect(&textures),
+            sized.local_rect(&images),
             Some(Rect::new(-5.0, -1.0, 5.0, 1.0))
         );
-        textures.remove(tall);
-        assert_eq!(sprite.local_rect(&textures), None);
+        images.remove(&tall);
+        assert_eq!(sprite.local_rect(&images), None);
     }
 
     #[test]
-    fn prefab_data_resolves_texture_names() {
-        let mut world = World::new();
-        let mut textures = Textures::default();
-        let bunny = textures.add_named("bunny", Image::filled(2, 2, Color::RED));
-        world.insert_resource(textures);
-
+    fn prefab_data_loads_texture_paths() {
+        let mut app = cg_core::App::new();
+        app.add_plugins(AssetPlugin {
+            hot_reload: Some(false),
+            ..AssetPlugin::default()
+        })
+        .init_asset::<Image>();
+        let world = app.world();
         let data: SpriteData = ron::from_str(
-            r##"(texture: "bunny", pivot: (0.5, 0), color: "#ffcc00", flip_x: true)"##,
+            r##"(texture: "images/bunny.png", pivot: (0.5, 0), color: "#ffcc00", flip_x: true)"##,
         )
         .unwrap();
-        let sprite = Sprite::from_data(&data, &world).unwrap();
+        let sprite = Sprite::from_data(&data, world).unwrap();
+        let server = world.resource::<AssetServer>();
         assert_eq!(
             sprite,
             Sprite {
                 pivot: vec2(0.5, 0.0),
                 color: Color::hex(0xffcc00),
                 flip_x: true,
-                ..Sprite::new(bunny)
+                ..Sprite::new(server.load("images/bunny.png"))
             }
         );
+        assert!(sprite.texture.is_strong());
 
-        let plain = Sprite::from_data(&SpriteData::default(), &world).unwrap();
+        let plain = Sprite::from_data(&SpriteData::default(), world).unwrap();
         assert_eq!(plain, Sprite::default());
 
-        let missing = SpriteData {
-            texture: "carrot".into(),
-            ..SpriteData::default()
-        };
+        let no_server = World::new();
         assert_eq!(
-            Sprite::from_data(&missing, &world),
-            Err("no texture called `carrot`".to_owned())
+            Sprite::from_data(&data, &no_server),
+            Err("no asset server to load `images/bunny.png`".to_owned())
         );
     }
 }

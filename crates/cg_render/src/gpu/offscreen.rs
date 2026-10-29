@@ -2,7 +2,8 @@
 
 use super::painter::{FrameInput, Painter, extent};
 use super::{RenderError, describe, request_device};
-use crate::{CameraView, DebugShapes, Image, Sprites, Textures};
+use crate::{CameraView, DebugShapes, Image, Sprites};
+use cg_assets::Assets;
 use cg_core::glam::UVec2;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -16,16 +17,17 @@ const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 /// (WARP on Windows, lavapipe or llvmpipe on Linux).
 ///
 /// ```no_run
+/// use cg_assets::Assets;
 /// use cg_core::prelude::*;
-/// use cg_render::{CameraView, Color, DebugShapes, OffscreenRenderer, Sprite, Sprites, Textures};
+/// use cg_render::{CameraView, Color, DebugShapes, OffscreenRenderer, Sprite, Sprites};
 ///
 /// let mut renderer = pollster::block_on(OffscreenRenderer::new())?;
 /// let mut sprites = Sprites::default();
-/// sprites.draw(Sprite::solid(Color::RED, vec2(8.0, 8.0)), Affine2::IDENTITY);
+/// sprites.draw(&Sprite::solid(Color::RED, vec2(8.0, 8.0)), Affine2::IDENTITY);
 /// let image = renderer.render(
 ///     uvec2(64, 36),
 ///     &CameraView::default(),
-///     &Textures::default(),
+///     &Assets::default(),
 ///     &sprites,
 ///     &DebugShapes::default(),
 /// )?;
@@ -74,7 +76,7 @@ impl OffscreenRenderer {
         &mut self,
         size: UVec2,
         view: &CameraView,
-        textures: &Textures,
+        images: &Assets<Image>,
         sprites: &Sprites,
         shapes: &DebugShapes,
     ) -> Result<Image, RenderError> {
@@ -91,10 +93,10 @@ impl OffscreenRenderer {
         });
         let target = texture.create_view(&wgpu::TextureViewDescriptor::default());
         self.painter
-            .sync_textures(&self.device, &self.queue, textures);
+            .sync_textures(&self.device, &self.queue, images);
         let input = FrameInput {
             view,
-            textures,
+            images,
             sprites: sprites.queued(),
             shapes,
             scale_factor: 1.0,

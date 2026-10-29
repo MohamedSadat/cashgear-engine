@@ -12,11 +12,14 @@ publish.workspace = true
 # Direct dependency so bevy's derive macros (`Resource`) can find `bevy_ecs`.
 bevy_ecs.workspace = true
 bytemuck.workspace = true
+cg_assets.workspace = true
 cg_core.workspace = true
 cg_platform.workspace = true
 cg_world.workspace = true
 image.workspace = true
 log.workspace = true
+# Texture atlas files.
+ron.workspace = true
 serde.workspace = true
 wgpu.workspace = true
 
@@ -27,7 +30,6 @@ wgpu = { workspace = true, features = ["webgl", "fragile-send-sync-non-atomic-wa
 
 [dev-dependencies]
 pollster.workspace = true
-ron.workspace = true
 
 [lints]
 workspace = true

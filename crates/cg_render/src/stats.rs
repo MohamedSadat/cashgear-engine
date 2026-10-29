@@ -58,9 +58,17 @@ impl RenderStats {
         self.shapes
     }
 
-    /// Sprite entities skipped last frame because they were outside the camera's view.
+    /// Sprites skipped last frame because they were outside the camera's view: sprite
+    /// entities, plus what other queueing systems (such as tilemap chunks) counted with
+    /// [`add_culled`](Self::add_culled).
     pub fn culled(&self) -> u32 {
         self.culled
+    }
+
+    /// Counts sprites a queueing system skipped this frame as outside the view. Call it in
+    /// [`RenderSystems::Queue`](crate::RenderSystems::Queue).
+    pub fn add_culled(&mut self, count: u32) {
+        self.culled += count;
     }
 
     /// The average time between frames, refreshed twice a second. Zero until then.

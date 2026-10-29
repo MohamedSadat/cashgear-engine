@@ -3,10 +3,9 @@
 
 use crate::batch::{Batcher, SpriteInstance};
 use crate::debug::{ShapeVertex, tessellate};
-use crate::{
-    CameraView, Color, DebugShapes, Filter, QueuedSprite, ScalingMode, TextureId, Textures,
-};
+use crate::{CameraView, Color, DebugShapes, Filter, Image, QueuedSprite, ScalingMode};
 use bytemuck::{Pod, Zeroable};
+use cg_assets::{AssetId, Assets};
 use cg_core::glam::{Mat4, UVec2, Vec2};
 use std::collections::HashMap;
 
@@ -16,7 +15,7 @@ const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 /// Everything a frame draws.
 pub(crate) struct FrameInput<'a> {
     pub(crate) view: &'a CameraView,
-    pub(crate) textures: &'a Textures,
+    pub(crate) images: &'a Assets<Image>,
     pub(crate) sprites: &'a [QueuedSprite],
     pub(crate) shapes: &'a DebugShapes,
     /// Physical pixels per logical pixel.
@@ -182,7 +181,7 @@ pub(crate) struct Painter {
     views: Views,
     instances: GrowBuffer,
     vertices: GrowBuffer,
-    textures: HashMap<TextureId, GpuTexture>,
+    textures: HashMap<AssetId<Image>, GpuTexture>,
     texture_revision: Option<u64>,
     pixel_target: Option<PixelTarget>,
     batcher: Batcher,
@@ -303,60 +302,72 @@ impl Painter {
         }
     }
 
-    /// Uploads new and changed textures and frees removed ones.
+    /// Uploads new and changed images and frees removed ones. [`AssetId::DEFAULT`] is a
+    /// built-in white texture unless an image was stored there.
     pub(crate) fn sync_textures(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        textures: &Textures,
+        images: &Assets<Image>,
     ) {
-        if self.texture_revision == Some(textures.revision()) {
+        if self.texture_revision == Some(images.revision()) {
             return;
         }
-        for (id, entry) in textures.slots() {
-            let Some(entry) = entry else {
-                self.textures.remove(&id);
-                continue;
-            };
+        self.textures.retain(|id, _| images.contains(*id));
+        for (id, image, version) in images.iter_versions() {
             if self
                 .textures
                 .get(&id)
-                .is_some_and(|gpu| gpu.version == entry.version)
+                .is_some_and(|gpu| gpu.version == version)
             {
                 continue;
             }
-            let size = entry.image.size();
-            let bind_group = if size.max_element() > self.max_texture_size {
-                log::error!(
-                    "texture {} is {}x{}, larger than this GPU's limit of {}; it will not be drawn",
-                    id.index(),
-                    size.x,
-                    size.y,
-                    self.max_texture_size
-                );
-                None
-            } else {
-                let view = upload_texture(device, queue, &entry.image);
-                let sampler = match entry.filter {
-                    Filter::Nearest => &self.nearest,
-                    Filter::Linear => &self.linear,
-                };
-                Some(texture_bind_group(
-                    device,
-                    &self.texture_layout,
-                    &view,
-                    sampler,
-                ))
-            };
-            self.textures.insert(
-                id,
-                GpuTexture {
-                    version: entry.version,
-                    bind_group,
-                },
-            );
+            let texture = self.upload(device, queue, id, image, version);
+            self.textures.insert(id, texture);
         }
-        self.texture_revision = Some(textures.revision());
+        if !self.textures.contains_key(&AssetId::DEFAULT) {
+            let white = Image::filled(1, 1, Color::WHITE);
+            let texture = self.upload(device, queue, AssetId::DEFAULT, &white, 0);
+            self.textures.insert(AssetId::DEFAULT, texture);
+        }
+        self.texture_revision = Some(images.revision());
+    }
+
+    fn upload(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        id: AssetId<Image>,
+        image: &Image,
+        version: u64,
+    ) -> GpuTexture {
+        let size = image.size();
+        let bind_group = if size.max_element() > self.max_texture_size {
+            log::error!(
+                "texture {} is {}x{}, larger than this GPU's limit of {}; it will not be drawn",
+                id.index(),
+                size.x,
+                size.y,
+                self.max_texture_size
+            );
+            None
+        } else {
+            let view = upload_texture(device, queue, image);
+            let sampler = match image.filter() {
+                Filter::Nearest => &self.nearest,
+                Filter::Linear => &self.linear,
+            };
+            Some(texture_bind_group(
+                device,
+                &self.texture_layout,
+                &view,
+                sampler,
+            ))
+        };
+        GpuTexture {
+            version,
+            bind_group,
+        }
     }
 
     /// Draws a frame into `target` (viewed as this painter's format) and submits it.
@@ -377,7 +388,7 @@ impl Painter {
         let view_proj = input.view.view_projection(viewport.world_size);
 
         // Build this frame's geometry.
-        self.batcher.build(input.sprites, input.textures);
+        self.batcher.build(input.sprites, input.images);
         self.shape_vertices.clear();
         if letterbox {
             // The letterbox background: a quad covering the viewport, under everything.

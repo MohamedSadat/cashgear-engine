@@ -2,8 +2,9 @@
 
 use super::painter::{FrameInput, FrameStats, Painter};
 use super::{RenderError, describe, request_device};
-use crate::{DebugShapes, FrameView, RenderPlugin, RenderStats, Sprites, Textures};
+use crate::{DebugShapes, FrameView, Image, RenderPlugin, RenderStats, Sprites};
 use bevy_ecs::prelude::*;
+use cg_assets::Assets;
 use cg_core::glam::UVec2;
 use cg_core::{AppExit, Time};
 use cg_platform::{Lifecycle, Window, WindowHandle};
@@ -115,7 +116,7 @@ impl Gpu {
         input: &FrameInput<'_>,
     ) -> Result<Option<FrameStats>, RenderError> {
         self.painter
-            .sync_textures(&self.device, &self.queue, input.textures);
+            .sync_textures(&self.device, &self.queue, input.images);
         if size.x == 0 || size.y == 0 {
             return Ok(None);
         }
@@ -272,7 +273,7 @@ pub(crate) fn render(
     handle: Option<Res<WindowHandle>>,
     mut lifecycle: MessageReader<Lifecycle>,
     view: Res<FrameView>,
-    textures: Res<Textures>,
+    images: Res<Assets<Image>>,
     mut sprites: ResMut<Sprites>,
     mut shapes: ResMut<DebugShapes>,
     mut stats: ResMut<RenderStats>,
@@ -292,7 +293,7 @@ pub(crate) fn render(
         Some(handle) if !renderer.suspended => {
             let input = FrameInput {
                 view: &view.0,
-                textures: &textures,
+                images: &images,
                 sprites: sprites.queued(),
                 shapes: &shapes,
                 scale_factor: window.scale_factor() as f32,

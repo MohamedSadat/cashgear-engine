@@ -1,0 +1,17 @@
+[package]
+name = "tiled_map"
+description = "CashGear Engine example: a Tiled level with parallax, prefab objects, an atlas and hot reloading."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cashgear_engine.workspace = true
+# Game components derive serde so prefabs and Tiled properties can set them.
+serde.workspace = true
+
+[lints]
+workspace = true

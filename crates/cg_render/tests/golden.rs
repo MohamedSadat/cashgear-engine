@@ -10,11 +10,12 @@
 // Tests read and write reference files on desktop only.
 #![allow(clippy::disallowed_methods)]
 
+use cg_assets::{Assets, Handle};
 use cg_core::Rect;
 use cg_core::glam::{UVec2, Vec2, uvec2, vec2};
 use cg_render::{
     Camera2D, CameraView, Color, DebugShapes, Filter, Image, OffscreenRenderer, ScalingMode,
-    Sprite, Sprites, TextureId, Textures,
+    Sprite, Sprites,
 };
 use cg_world::Transform2D;
 use std::path::PathBuf;
@@ -55,25 +56,25 @@ fn renderer() -> Option<MutexGuard<'static, OffscreenRenderer>> {
 fn render(
     size: UVec2,
     view: &CameraView,
-    textures: &Textures,
+    images: &Assets<Image>,
     sprites: &[Draw],
     shapes: &DebugShapes,
 ) -> Option<Image> {
     let mut renderer = renderer()?;
     let mut queue = Sprites::default();
     for draw in sprites {
-        queue.draw_on(draw.layer, draw.sprite, draw.transform);
+        queue.draw_on(draw.layer, &draw.sprite, draw.transform);
     }
     Some(
         renderer
-            .render(size, view, textures, &queue, shapes)
+            .render(size, view, images, &queue, shapes)
             .expect("render"),
     )
 }
 
 /// One sprite to queue: its look, transform and layer, with builder methods so each scene
 /// reads as a list.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Draw {
     sprite: Sprite,
     transform: Transform2D,
@@ -89,8 +90,8 @@ impl Draw {
         }
     }
 
-    fn of(texture: TextureId) -> Self {
-        Self::new(Sprite::new(texture))
+    fn of(texture: &Handle<Image>) -> Self {
+        Self::new(Sprite::new(texture.clone()))
     }
 
     fn at(mut self, x: f32, y: f32) -> Self {
@@ -201,18 +202,18 @@ fn camera(scaling: ScalingMode) -> CameraView {
 /// Sprites exercising every `Sprite` field, on a 160×90 pixel grid.
 #[test]
 fn sprites() {
-    let mut textures = Textures::default();
-    let quad = textures.add(quadrants());
-    let gradient = textures.add_with_filter(
+    let mut images = Assets::default();
+    let quad = images.add(quadrants());
+    let gradient = images.add(
         Image::from_fn(2, 2, |x, y| match (x, y) {
             (0, 0) => [255, 0, 0, 255],
             (1, 0) => [0, 255, 0, 255],
             (0, 1) => [0, 0, 255, 255],
             _ => [255, 255, 255, 255],
-        }),
-        Filter::Linear,
+        })
+        .with_filter(Filter::Linear),
     );
-    let at = |x: f32, y: f32| Draw::of(quad).at(x, y);
+    let at = |x: f32, y: f32| Draw::of(&quad).at(x, y);
     let sprites = [
         // Top row: plain, flipped x, flipped y, both, a source quarter scaled up.
         at(-64.0, 28.0),
@@ -223,7 +224,7 @@ fn sprites() {
             .sprite(|s| s.source = Some(Rect::new(4.0, 0.0, 8.0, 4.0)))
             .scale(Vec2::splat(3.0)),
         // A linear-filtered gradient, stretched.
-        Draw::of(gradient)
+        Draw::of(&gradient)
             .at(44.0, 26.0)
             .sprite(|s| s.size = Some(vec2(24.0, 16.0))),
         // Middle row: rotation, a bottom-left pivot, a tint, half transparency.
@@ -251,7 +252,7 @@ fn sprites() {
     let Some(image) = render(
         uvec2(160, 90),
         &camera(ScalingMode::PixelPerfect(uvec2(160, 90))),
-        &textures,
+        &images,
         &sprites,
         &DebugShapes::default(),
     ) else {
@@ -264,17 +265,17 @@ fn sprites() {
 /// sprite, and a thin debug line drawn at full resolution on top.
 #[test]
 fn pixel_perfect() {
-    let mut textures = Textures::default();
-    let quad = textures.add(quadrants());
+    let mut images = Assets::default();
+    let quad = images.add(quadrants());
     let mut cam = camera(ScalingMode::PixelPerfect(uvec2(64, 36)));
     cam.position = vec2(0.4, 0.3);
     let sprites = [
-        Draw::of(quad).at(-10.3, 4.6),
-        Draw::of(quad).at(12.0, -6.0).rotation(0.4),
+        Draw::of(&quad).at(-10.3, 4.6),
+        Draw::of(&quad).at(12.0, -6.0).rotation(0.4),
     ];
     let mut shapes = DebugShapes::default();
     shapes.line(vec2(-30.0, -15.0), vec2(30.0, 15.0), Color::GREEN);
-    let Some(image) = render(uvec2(200, 120), &cam, &textures, &sprites, &shapes) else {
+    let Some(image) = render(uvec2(200, 120), &cam, &images, &sprites, &shapes) else {
         return;
     };
     check("pixel_perfect", &image);
@@ -283,12 +284,12 @@ fn pixel_perfect() {
 /// Letterbox and stretch fitting the same 64×36 view into a square target.
 #[test]
 fn letterbox_and_stretch() {
-    let mut textures = Textures::default();
-    let quad = textures.add(quadrants());
+    let mut images = Assets::default();
+    let quad = images.add(quadrants());
     let sprites = [
-        Draw::of(quad).rotation(0.3).scale(Vec2::splat(2.0)),
-        Draw::of(quad).at(-28.0, 14.0),
-        Draw::of(quad).at(28.0, -14.0),
+        Draw::of(&quad).rotation(0.3).scale(Vec2::splat(2.0)),
+        Draw::of(&quad).at(-28.0, 14.0),
+        Draw::of(&quad).at(28.0, -14.0),
     ];
     for (name, scaling) in [
         ("letterbox", ScalingMode::Letterbox(uvec2(64, 36))),
@@ -297,7 +298,7 @@ fn letterbox_and_stretch() {
         let Some(image) = render(
             uvec2(96, 96),
             &camera(scaling),
-            &textures,
+            &images,
             &sprites,
             &DebugShapes::default(),
         ) else {
@@ -310,16 +311,16 @@ fn letterbox_and_stretch() {
 /// A window-sized view through a moved, zoomed and rotated camera.
 #[test]
 fn camera_transform() {
-    let mut textures = Textures::default();
-    let quad = textures.add(quadrants());
+    let mut images = Assets::default();
+    let quad = images.add(quadrants());
     let mut cam = camera(ScalingMode::WindowSize);
     cam.position = vec2(8.0, 4.0);
     cam.camera.zoom = 2.0;
     cam.rotation = core::f32::consts::FRAC_PI_6;
-    let sprites = [Draw::of(quad), Draw::of(quad).at(16.0, 8.0)];
+    let sprites = [Draw::of(&quad), Draw::of(&quad).at(16.0, 8.0)];
     let mut shapes = DebugShapes::default();
     shapes.circle(Vec2::ZERO, 2.0, Color::WHITE);
-    let Some(image) = render(uvec2(96, 64), &cam, &textures, &sprites, &shapes) else {
+    let Some(image) = render(uvec2(96, 64), &cam, &images, &sprites, &shapes) else {
         return;
     };
     check("camera_transform", &image);
@@ -345,7 +346,7 @@ fn debug_shapes() {
     let Some(image) = render(
         uvec2(96, 64),
         &camera(ScalingMode::WindowSize),
-        &Textures::default(),
+        &Assets::default(),
         &[],
         &shapes,
     ) else {
@@ -357,14 +358,14 @@ fn debug_shapes() {
 /// Pixel snapping keeps whole-texel sprites on whole pixels wherever they are placed.
 #[test]
 fn snapped_sprites_cover_whole_pixels() {
-    let textures = Textures::default();
+    let images = Assets::default();
     let cam = camera(ScalingMode::PixelPerfect(uvec2(32, 18)));
     for offset in [0.0, 0.25, 0.5, 0.75, 0.999] {
         let sprites = [Draw::new(Sprite::solid(Color::WHITE, vec2(4.0, 3.0))).at(offset, -offset)];
         let Some(image) = render(
             uvec2(32, 18),
             &cam,
-            &textures,
+            &images,
             &sprites,
             &DebugShapes::default(),
         ) else {
@@ -388,7 +389,7 @@ fn snapped_sprites_cover_whole_pixels() {
 /// Colours come out exactly as given, and alpha blends in linear light.
 #[test]
 fn srgb_colours_and_linear_blending() {
-    let textures = Textures::default();
+    let images = Assets::default();
     let mut cam = camera(ScalingMode::WindowSize);
     cam.camera.clear_color = Color::BLACK;
     let solid = |color: Color, x: f32| Draw::new(Sprite::solid(color, vec2(8.0, 8.0))).at(x, 0.0);
@@ -399,7 +400,7 @@ fn srgb_colours_and_linear_blending() {
     let Some(image) = render(
         uvec2(32, 16),
         &cam,
-        &textures,
+        &images,
         &sprites,
         &DebugShapes::default(),
     ) else {
@@ -422,8 +423,8 @@ fn hierarchy_matches_hand_placed_sprites() {
     use cg_world::{GlobalTransform2D, WorldPlugin};
     use core::time::Duration;
 
-    let mut textures = Textures::default();
-    let quad = textures.add(quadrants());
+    let mut images = Assets::default();
+    let quad = images.add(quadrants());
     let mut app = App::new();
     app.add_plugins(WorldPlugin);
     let parent = app
@@ -442,8 +443,8 @@ fn hierarchy_matches_hand_placed_sprites() {
 
     let view = camera(ScalingMode::PixelPerfect(uvec2(64, 36)));
     let mut from_ecs = Sprites::default();
-    from_ecs.draw(Sprite::new(quad), global);
-    let by_hand = [Draw::of(quad)
+    from_ecs.draw(&Sprite::new(quad.clone()), global);
+    let by_hand = [Draw::of(&quad)
         .at(-10.0 + 12.0 * 0.5f32.cos(), 2.0 + 12.0 * 0.5f32.sin())
         .rotation(0.5)
         .scale(Vec2::splat(2.0))];
@@ -453,9 +454,9 @@ fn hierarchy_matches_hand_placed_sprites() {
     let size = uvec2(64, 36);
     let shapes = DebugShapes::default();
     let ecs_image = renderer
-        .render(size, &view, &textures, &from_ecs, &shapes)
+        .render(size, &view, &images, &from_ecs, &shapes)
         .unwrap();
     drop(renderer);
-    let hand_image = render(size, &view, &textures, &by_hand, &shapes).unwrap();
+    let hand_image = render(size, &view, &images, &by_hand, &shapes).unwrap();
     assert_eq!(ecs_image.data(), hand_image.data());
 }

@@ -1,11 +1,13 @@
-//! Renderer of CashGear Engine: the `wgpu` context and window surface, textures, the sprite
-//! batcher, the 2D camera with virtual resolutions, debug shapes and render stats.
+//! Renderer of CashGear Engine: the `wgpu` context and window surface, image and atlas
+//! assets, the sprite batcher, the 2D camera with virtual resolutions, debug shapes and
+//! render stats.
 //!
 //! Entities are drawn from their components:
 //!
 //! | Component | Does |
 //! | --- | --- |
 //! | [`Sprite`] | A textured quad at the entity's transform |
+//! | [`AtlasSprite`] | Points the entity's `Sprite` at a named region of a [`TextureAtlas`] |
 //! | [`Layer`] | Draw order: higher layers on top |
 //! | [`Visibility`] | Hides an entity and the children that inherit from it |
 //! | [`Camera2D`] | The view: zoom and [`ScalingMode`], placed by the entity's transform |
@@ -16,13 +18,17 @@
 //!
 //! | Resource | Holds |
 //! | --- | --- |
-//! | [`Textures`] | Images the renderer can draw, uploaded to the GPU when it is ready |
+//! | `Assets<Image>` | Images the renderer can draw, uploaded to the GPU when they appear or change |
 //! | [`Sprites`] | This frame's [`QueuedSprite`]s, sorted by layer then texture, one draw call per batch |
 //! | [`DebugShapes`] | This frame's lines, rectangles and circles, drawn on top |
 //! | [`RenderStats`] | Draw calls, sprites, culled sprites, frame time and the GPU in use |
 //!
+//! Images are assets: `server.load("images/hero.png")` loads a PNG (with [`ImageLoader`]),
+//! and `server.load("atlases/items.atlas.ron")` a texture atlas packed by `cg_pack` (with
+//! [`AtlasLoader`]).
+//!
 //! Colours are sRGB ([`Color`]) and blending happens in linear light. Textures use nearest
-//! sampling unless they ask for [`Filter::Linear`]. On the web the renderer uses WebGPU
+//! sampling unless their image asks for [`Filter::Linear`]. On the web the renderer uses WebGPU
 //! where the browser supports it and WebGL2 otherwise; there the GPU becomes ready a few
 //! frames after start-up, and nothing is drawn until then.
 //!
@@ -41,7 +47,7 @@
 //! }
 //!
 //! fn draw(mut sprites: ResMut<Sprites>, mut debug: ResMut<DebugShapes>) {
-//!     sprites.draw(Sprite::solid(Color::WHITE, vec2(8.0, 8.0)), Transform2D::IDENTITY);
+//!     sprites.draw(&Sprite::solid(Color::WHITE, vec2(8.0, 8.0)), Transform2D::IDENTITY);
 //!     debug.circle(Vec2::ZERO, 12.0, Color::GREEN);
 //! }
 //!
@@ -54,6 +60,7 @@
 //!     .run();
 //! ```
 
+mod atlas;
 mod batch;
 mod camera;
 mod color;
@@ -63,9 +70,9 @@ mod image;
 mod queue;
 mod sprite;
 mod stats;
-mod texture;
 mod visibility;
 
+pub use atlas::{AtlasFile, AtlasLoader, AtlasRegion, AtlasSprite, AtlasSpriteData, TextureAtlas};
 pub use camera::{
     Camera2D, CameraView, DEFAULT_VIRTUAL_RESOLUTION, MainCamera, ScalingMode, Viewport,
 };
@@ -73,25 +80,26 @@ pub use color::Color;
 pub use debug::DebugShapes;
 pub use gpu::RenderError;
 pub use gpu::offscreen::OffscreenRenderer;
-pub use image::{Image, ImageError};
+pub use image::{Filter, Image, ImageError, ImageLoader};
 pub use queue::{FrameView, RenderSystems};
 pub use sprite::{Layer, QueuedSprite, Sprite, SpriteData, Sprites};
 pub use stats::RenderStats;
-pub use texture::{Filter, TextureId, Textures};
 pub use visibility::{InheritedVisibility, Visibility};
 /// The `wgpu` crate the renderer is built on, for its configuration types.
 pub use wgpu;
 
 use bevy_ecs::schedule::IntoScheduleConfigs;
+use cg_assets::AppAssetExt;
 use cg_core::{App, Plugin, PostUpdate, Render};
 use cg_platform::{Args, Lifecycle, Window};
 use cg_world::{AppWorldExt, TransformSystems, WorldPlugin};
 
-/// Adds the renderer: the [`Textures`], [`Sprites`], [`DebugShapes`], [`FrameView`] and
-/// [`RenderStats`] resources, visibility propagation in [`PostUpdate`], and the systems
+/// Adds the renderer: the [`Image`] and [`TextureAtlas`] asset types with their loaders,
+/// the [`Sprites`], [`DebugShapes`], [`FrameView`] and [`RenderStats`] resources,
+/// [`AtlasSprite`] updates and visibility propagation in [`PostUpdate`], and the systems
 /// that queue sprite entities and draw everything into the window in the [`Render`]
-/// schedule. Registers `Sprite`, `Layer`, `Visibility` and `Camera2D` for prefabs, and adds
-/// [`WorldPlugin`] if it is missing.
+/// schedule. Registers `Sprite`, `AtlasSprite`, `Layer`, `Visibility` and `Camera2D` for
+/// prefabs, and adds [`WorldPlugin`] and the asset plugin if they are missing.
 ///
 /// Needs [`WindowPlugin`](cg_platform::WindowPlugin) for the window. The GPU is set up
 /// once the window exists; if that fails the error is logged and the app exits with an
@@ -140,24 +148,34 @@ impl Plugin for RenderPlugin {
         }
         app.init_resource::<Window>()
             .add_message::<Lifecycle>()
-            .init_resource::<Textures>()
+            .init_asset::<Image>()
+            .register_loader(ImageLoader)
+            .init_asset::<TextureAtlas>()
+            .register_loader(AtlasLoader)
             .init_resource::<Sprites>()
             .init_resource::<DebugShapes>()
             .init_resource::<FrameView>()
             .init_resource::<RenderStats>()
             .register_prefab_component::<Sprite>("Sprite")
+            .register_prefab_component::<AtlasSprite>("AtlasSprite")
             .register_component::<Layer>("Layer")
             .register_component::<Visibility>("Visibility")
             .register_component::<Camera2D>("Camera2D")
             .insert_resource(gpu::window::WindowRenderer::new(self.clone()))
             .add_systems(
                 PostUpdate,
-                visibility::propagate_visibility.after(TransformSystems::Propagate),
+                (
+                    atlas::apply_atlas_sprites,
+                    visibility::propagate_visibility.after(TransformSystems::Propagate),
+                ),
             )
             .add_systems(
                 Render,
                 (
-                    queue::queue_world.in_set(RenderSystems::Queue),
+                    queue::pick_camera.in_set(RenderSystems::View),
+                    queue::queue_world
+                        .in_set(RenderSystems::Queue)
+                        .after(RenderSystems::View),
                     gpu::window::render
                         .in_set(RenderSystems::Draw)
                         .after(RenderSystems::Queue),
@@ -166,11 +184,12 @@ impl Plugin for RenderPlugin {
     }
 }
 
-/// Common imports: the plugin, sprites and layers, visibility, textures, images, colours,
-/// the camera and debug shapes.
+/// Common imports: the plugin, sprites (and queued ones) and layers, atlases, visibility,
+/// images, colours, the camera and debug shapes.
 pub mod prelude {
     pub use crate::{
-        Camera2D, CameraView, Color, DebugShapes, Filter, Image, Layer, MainCamera, RenderPlugin,
-        RenderStats, ScalingMode, Sprite, Sprites, TextureId, Textures, Visibility,
+        AtlasSprite, Camera2D, CameraView, Color, DebugShapes, Filter, Image, Layer, MainCamera,
+        QueuedSprite, RenderPlugin, RenderStats, ScalingMode, Sprite, Sprites, TextureAtlas,
+        Visibility,
     };
 }

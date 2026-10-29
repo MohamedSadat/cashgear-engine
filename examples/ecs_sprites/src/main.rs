@@ -8,9 +8,15 @@
 //! - Web: run `trunk serve --port 8082` in `examples/ecs_sprites` and open
 //!   <http://127.0.0.1:8082> (`?demo` for the demo). The log is in the browser console.
 //!
-//! The states form a stack: `Menu`, then `Playing`, with `Paused` pushed on top of
-//! `Playing` so the level stays on screen, frozen, under a dim overlay.
+//! The states form a stack: `Loading`, then `Menu`, then `Playing`, with `Paused` pushed on
+//! top of `Playing` so the level stays on screen, frozen, under a dim overlay.
 //!
+//! - **Loading**: the prefabs (`assets/prefabs`) and bunny images (`assets/images`) load
+//!   through the asset server, from disk or over the network; the menu starts once they
+//!   are all in. The hat, stars, ground and clouds are drawn in code and registered under
+//!   `generated/...` paths, so the prefabs can name them too. On desktop, editing a prefab
+//!   or image while the game runs reloads it: new spawns use the new prefab, and every
+//!   sprite shows the new image. `--asset-delay 1` slows loading down to see the state.
 //! - **Menu**: the logo prefab, a bunny with a ring of stars that orbit it (the ring
 //!   spins; its children follow).
 //! - **Playing**: bunnies in party hats fall from the sky every few tenths of a second,
@@ -43,12 +49,9 @@ const GRAVITY: f32 = -900.0;
 /// Seconds between falling bunnies.
 const SPAWN_EVERY: f32 = 0.3;
 
-const LOGO: &str = include_str!("../assets/logo.prefab.ron");
-const PLAYER: &str = include_str!("../assets/player.prefab.ron");
-const BUNNY: &str = include_str!("../assets/bunny.prefab.ron");
-
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 enum GameState {
+    Loading,
     Menu,
     Playing,
     Paused,
@@ -104,6 +107,16 @@ struct Score {
     spawned: u32,
     caught: u32,
     last_report: f64,
+}
+
+/// The images drawn in code. The handles keep them loaded; the prefabs find the hat and
+/// star by their `generated/...` paths.
+#[derive(Resource)]
+struct Art {
+    ground: Handle<Image>,
+    cloud: Handle<Image>,
+    _hat: Handle<Image>,
+    _star: Handle<Image>,
 }
 
 /// When the next bunny falls, and a random number generator for where.
@@ -163,10 +176,14 @@ const DEMO: [(u64, &str); 5] = [
 fn demo(
     time: Res<Time>,
     mut commands: Commands,
+    state: Res<State<GameState>>,
     mut next: ResMut<NextState<GameState>>,
     mut spawner: ResMut<Spawner>,
     mut score: ResMut<Score>,
 ) {
+    if *state.current() == GameState::Loading {
+        return;
+    }
     let frame = time.frame_count() % 480;
     let Some((_, step)) = DEMO.iter().find(|(at, _)| *at == frame) else {
         return;
@@ -194,7 +211,7 @@ struct Game;
 
 impl Plugin for Game {
     fn build(&self, app: &mut App) {
-        use GameState::{Menu, Paused, Playing};
+        use GameState::{Loading, Menu, Paused, Playing};
         app.insert_resource(action_map())
             .init_resource::<Score>()
             .init_resource::<Spawner>()
@@ -202,11 +219,13 @@ impl Plugin for Game {
             .register_component::<Lifetime>("Lifetime")
             .register_component::<Spin>("Spin")
             .register_component::<Player>("Player")
-            .add_prefab("logo", LOGO)
-            .add_prefab("player", PLAYER)
-            .add_prefab("bunny", BUNNY)
-            .init_state(Menu)
+            .load_prefab("logo", "prefabs/logo.prefab.ron")
+            .load_prefab("player", "prefabs/player.prefab.ron")
+            .load_prefab("bunny", "prefabs/bunny.prefab.ron")
+            .init_state(Loading)
+            .add_loading_state(Loading, Menu)
             .add_systems(Startup, setup)
+            .add_systems(OnEnter(Loading), start_loading)
             .add_systems(OnEnter(Menu), enter_menu)
             .add_systems(OnEnter(Playing), enter_playing)
             .add_systems(OnExit(Playing), exit_playing)
@@ -262,25 +281,15 @@ fn action_map() -> ActionMap {
         .bind("back", GamepadButton::Select)
 }
 
-/// Draws the art the prefabs refer to by name, and spawns the camera that lives through
-/// every state.
-fn setup(mut commands: Commands, mut textures: ResMut<Textures>) {
-    for (name, png) in [
-        (
-            "bunny_white",
-            include_bytes!("../assets/bunny_white.png").as_slice(),
-        ),
-        (
-            "bunny_brown",
-            include_bytes!("../assets/bunny_brown.png").as_slice(),
-        ),
-    ] {
-        textures.add_named(name, Image::from_png(png).expect("bunny PNGs are valid"));
-    }
-    textures.add_named("hat", hat());
-    textures.add_named("star", star());
-    textures.add_named("ground", ground());
-    textures.add_named("cloud", cloud());
+/// Draws the art made in code, registering it under paths the prefabs can name, and spawns
+/// the camera that lives through every state.
+fn setup(mut commands: Commands, server: Res<AssetServer>) {
+    commands.insert_resource(Art {
+        ground: server.add("generated/ground", ground()),
+        cloud: server.add("generated/cloud", cloud()),
+        _hat: server.add("generated/hat", hat()),
+        _star: server.add("generated/star", star()),
+    });
 
     commands.spawn((
         Name::new("camera"),
@@ -291,6 +300,15 @@ fn setup(mut commands: Commands, mut textures: ResMut<Textures>) {
         // It follows the player in fixed steps, so it is drawn smoothly too.
         Interpolated::default(),
     ));
+}
+
+/// Starts loading the bunny images; the prefabs are already loading. The menu starts once
+/// everything in `LoadingAssets` is in.
+fn start_loading(server: Res<AssetServer>, mut loading: ResMut<LoadingAssets>) {
+    for path in ["images/bunny_white.png", "images/bunny_brown.png"] {
+        loading.add(server.load::<Image>(path));
+    }
+    info!("loading {} assets", loading.handles().len());
 }
 
 fn enter_menu(
@@ -329,13 +347,12 @@ fn spin(time: Res<Time>, mut spinners: Query<(&mut Transform2D, &Spin)>) {
 /// Builds the level: ground tiles, clouds and the player, all scoped to `Playing`.
 fn enter_playing(
     mut commands: Commands,
-    textures: Res<Textures>,
+    art: Res<Art>,
     mut score: ResMut<Score>,
     mut spawner: ResMut<Spawner>,
     state: Res<State<GameState>>,
 ) {
     let scope = StateScoped(GameState::Playing);
-    let texture = |name| textures.named(name).unwrap_or(TextureId::WHITE);
     // Ground: one row of 16×16 tiles under one parent, so the whole floor is one entity
     // tree that despawns together.
     commands
@@ -350,7 +367,7 @@ fn enter_playing(
                 ground.spawn((
                     Sprite {
                         pivot: vec2(0.0, 1.0),
-                        ..Sprite::new(texture("ground"))
+                        ..Sprite::new(art.ground.clone())
                     },
                     Transform2D::from_xy(x, 0.0),
                 ));
@@ -362,7 +379,7 @@ fn enter_playing(
         .enumerate()
     {
         commands.spawn((
-            Sprite::new(texture("cloud")),
+            Sprite::new(art.cloud.clone()),
             Transform2D::from_xy(x, 110.0 + 25.0 * (i % 2) as f32).with_scale(Vec2::splat(2.0)),
             Layer(-1),
             Velocity(vec2(8.0 + 3.0 * i as f32, 0.0)),
@@ -685,13 +702,36 @@ mod tests {
     use cashgear_engine::world::PrefabRegistry;
 
     #[test]
-    fn prefabs_parse() {
+    fn prefabs_load_and_parse() {
         let mut app = App::new();
-        app.add_plugins(RenderPlugin::default()).add_plugins(Game);
+        app.add_plugins(AssetPlugin {
+            hot_reload: Some(false),
+            ..default()
+        })
+        .add_plugins(InputPlugin { gamepads: false })
+        .add_plugins(RenderPlugin::default())
+        .add_plugins(Game);
+        // Desktop reads files at once. The prefabs load in the first update; the images
+        // are asked for in `OnEnter(Loading)`, after that update's asset systems, so they
+        // arrive in the second. The menu starts in the third.
+        for _ in 0..3 {
+            app.update(core::time::Duration::ZERO);
+        }
+        assert_eq!(
+            *app.world().resource::<State<GameState>>().current(),
+            GameState::Menu
+        );
         let world = app.world_mut();
+        let progress = world
+            .resource::<LoadingAssets>()
+            .progress(world.resource::<AssetServer>());
+        assert_eq!((progress.loaded, progress.total), (5, 5), "{progress:?}");
         let failures = world.resource_scope(|world, mut prefabs: Mut<Prefabs>| {
             prefabs.parse_all(world.resource::<PrefabRegistry>())
         });
         assert!(failures.is_empty(), "{failures:?}");
+        for name in ["logo", "player", "bunny"] {
+            assert!(world.resource::<Prefabs>().contains(name), "{name}");
+        }
     }
 }

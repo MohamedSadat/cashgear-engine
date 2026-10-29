@@ -2,7 +2,7 @@
 // on the ground, blinks in its last second, then despawns with its hat.
 (
     components: {
-        "Sprite": (texture: "bunny_white", pivot: (0.5, 0)),
+        "Sprite": (texture: "images/bunny_white.png", pivot: (0.5, 0)),
         "Layer": (1),
         "Interpolated": (),
         "Velocity": ((0, 0)),
@@ -11,7 +11,7 @@
     children: [
         (components: {
             "Transform2D": (translation: (1, 22)),
-            "Sprite": (texture: "hat", pivot: (0.5, 0), color: "#ff006e"),
+            "Sprite": (texture: "generated/hat", pivot: (0.5, 0), color: "#ff006e"),
             "Layer": (2),
         }),
     ],
