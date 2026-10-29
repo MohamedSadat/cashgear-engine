@@ -321,10 +321,14 @@ pub(crate) fn render(
         _ => Ok(None),
     };
     let frame = drawn.unwrap_or_else(|err| {
-        log::error!("{err}");
+        // Logged, and on the web shown by the page instead of a blank canvas.
+        cg_platform::page::fatal(&err.to_string());
         exit.write(AppExit::error());
         None
     });
+    if frame.is_some() {
+        cg_platform::page::ready();
+    }
     let frame = frame.unwrap_or_default();
     stats.draw_calls = frame.draw_calls;
     stats.sprites = frame.sprites;

@@ -189,6 +189,52 @@ fn dependencies_count_towards_loaded() {
 }
 
 #[test]
+fn a_bundle_serves_files_and_their_dependencies_before_the_folder() {
+    let folder = Folder::new("bundle");
+    folder.write("items/apple.txt", "loose apple");
+    folder.write("items/pear.txt", "loose pear");
+    let files = [
+        ("lists/header.txt", "Bundled"),
+        ("lists/food.list", "../items/apple.txt\n../items/pear.txt"),
+        ("items/apple.txt", "bundled apple"),
+    ];
+    let bytes = cg_platform::io::Bundle::write(
+        files
+            .iter()
+            .map(|(path, text)| (path.to_string(), text.as_bytes().to_vec()))
+            .collect(),
+    );
+    let bundle = folder.0.join("game.cgpak");
+    std::fs::write(&bundle, bytes).unwrap();
+    let mut app = App::new();
+    app.add_plugins(AssetPlugin {
+        root: Some(folder.0.to_string_lossy().into_owned()),
+        hot_reload: Some(true),
+        bundle: Some(bundle.to_string_lossy().into_owned()),
+        ..default()
+    })
+    .init_asset::<Text>()
+    .init_asset::<List>()
+    .register_loader(TextLoader)
+    .register_loader(ListLoader);
+    let server = server(&app);
+    assert_eq!(server.io().bundle().map(|b| b.len()), Some(3));
+
+    let food: Handle<List> = server.load("lists/food.list");
+    app.update(Duration::ZERO);
+    assert!(server.is_loaded(&food));
+    let lists = app.world().resource::<Assets<List>>();
+    let list = lists.get(&food).unwrap();
+    assert_eq!(list.header, "Bundled");
+    // The pear is not in the bundle, so it comes from the folder.
+    let names: Vec<_> = list.items.iter().map(|item| text(&app, item)).collect();
+    assert_eq!(
+        names,
+        [Some("bundled apple".into()), Some("loose pear".into())]
+    );
+}
+
+#[test]
 fn dropping_the_last_handle_unloads_the_asset() {
     let folder = Folder::new("unload");
     folder.write("a.txt", "first");

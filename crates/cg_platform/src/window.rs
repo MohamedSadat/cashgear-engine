@@ -26,6 +26,9 @@ pub struct WindowConfig {
     /// window is hidden or has no area, frames are capped at 60 per second either way. On
     /// the web the browser paces frames with `requestAnimationFrame`.
     pub max_fps: Option<f64>,
+    /// Desktop only: F11 and Alt+Enter toggle fullscreen. On the web the browser's own F11
+    /// fills the screen; games offer [`Window::set_fullscreen`] in a menu there.
+    pub fullscreen_keys: bool,
 }
 
 impl Default for WindowConfig {
@@ -37,6 +40,7 @@ impl Default for WindowConfig {
             resizable: true,
             canvas_id: None,
             max_fps: None,
+            fullscreen_keys: true,
         }
     }
 }
@@ -51,6 +55,10 @@ pub struct Window {
     pub(crate) suspended: bool,
     pub(crate) user_activated: bool,
     pub(crate) touch_screen: bool,
+    pub(crate) fullscreen: bool,
+    pub(crate) can_fullscreen: bool,
+    /// A change asked for by the game, applied by the runner after the frame.
+    pub(crate) fullscreen_request: Option<bool>,
 }
 
 impl Default for Window {
@@ -63,6 +71,9 @@ impl Default for Window {
             suspended: true,
             user_activated: false,
             touch_screen: false,
+            fullscreen: false,
+            can_fullscreen: false,
+            fullscreen_request: None,
         }
     }
 }
@@ -79,6 +90,9 @@ impl Window {
             suspended: false,
             user_activated: true,
             touch_screen: false,
+            fullscreen: false,
+            can_fullscreen: true,
+            fullscreen_request: None,
         }
     }
 
@@ -131,6 +145,30 @@ impl Window {
     /// touch controls use it to show themselves from the start.
     pub fn touch_screen(&self) -> bool {
         self.touch_screen
+    }
+
+    /// Whether the game fills the screen: a borderless fullscreen window on desktop, the
+    /// canvas in the browser's fullscreen mode on the web. It follows changes made outside
+    /// the game too, such as Escape leaving fullscreen in a browser.
+    pub fn fullscreen(&self) -> bool {
+        self.fullscreen_request.unwrap_or(self.fullscreen)
+    }
+
+    /// Whether [`set_fullscreen`](Self::set_fullscreen) can work here: on desktop, and in
+    /// browsers that let a page go fullscreen (not Safari on iPhone). Hide a fullscreen
+    /// setting where this is false. False on Android until Phase 11.
+    pub fn can_fullscreen(&self) -> bool {
+        self.can_fullscreen
+    }
+
+    /// Enters or leaves fullscreen after this frame. On the web, browsers allow entering
+    /// it only within a few seconds of a key press, click or touch, so call it while
+    /// handling one (reacting to a menu button's `Clicked` message is fine); otherwise the
+    /// browser refuses and [`fullscreen`](Self::fullscreen) turns false again.
+    pub fn set_fullscreen(&mut self, fullscreen: bool) {
+        if self.can_fullscreen {
+            self.fullscreen_request = Some(fullscreen);
+        }
     }
 }
 

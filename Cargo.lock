@@ -697,6 +697,7 @@ dependencies = [
  "glam 0.34.1",
  "js-sys",
  "log",
+ "miniz_oxide 0.9.1",
  "notify",
  "pollster",
  "ron",

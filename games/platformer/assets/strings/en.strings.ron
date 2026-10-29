@@ -27,6 +27,7 @@
         "settings.music": "Music",
         "settings.sfx": "Effects",
         "settings.touch": "Touch controls: {mode}",
+        "settings.fullscreen": "Fullscreen: {mode}",
         "settings.controls": "Controls",
         "touch.auto": "Auto",
         "touch.on": "On",

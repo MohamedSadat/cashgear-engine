@@ -30,6 +30,7 @@
         "settings.music": "الموسيقى",
         "settings.sfx": "المؤثرات",
         "settings.touch": "أزرار اللمس: {mode}",
+        "settings.fullscreen": "ملء الشاشة: {mode}",
         "settings.controls": "التحكم",
         "touch.auto": "تلقائي",
         "touch.on": "تشغيل",

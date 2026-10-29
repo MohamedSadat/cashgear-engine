@@ -16,12 +16,15 @@
 //! `fetch` or (from Phase 11) from the APK, and [`io::FileWatcher`] reports changed files
 //! on desktop for hot reloading. [`storage::Storage`] keeps small text values such as
 //! settings between runs: in files on desktop, in `localStorage` on the web;
-//! [`StoragePlugin`](storage::StoragePlugin) inserts it.
+//! [`StoragePlugin`](storage::StoragePlugin) inserts it. [`page`] sends events to the web
+//! page around the game (the first frame is drawn, the game failed), and
+//! [`io::Bundle`] packs a whole asset folder into one file for the web.
 
 mod args;
 pub mod input;
 pub mod io;
 mod log;
+pub mod page;
 mod runner;
 pub mod storage;
 mod target;

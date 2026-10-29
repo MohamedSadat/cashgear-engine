@@ -2,7 +2,7 @@
 
 CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WASM) and Android, built with `winit`, `wgpu` and `bevy_ecs`. A sample platformer (`games/platformer`) proves it. The engine is built in 15 phases; see [docs/PLAN.md](docs/PLAN.md) for the plan and [docs/PROGRESS.md](docs/PROGRESS.md) for where it stands.
 
-> **Status:** Phase 9. `cg_core` (app, plugins, fixed-timestep loop, `Time`, schedules), `cg_platform` (window, input, actions, lifecycle, logging, asset IO, save storage), `cg_render` (`wgpu` sprites with hit flashes, camera, virtual resolutions, debug shapes, culling, image and atlas assets), `cg_world` (transforms and hierarchy, interpolation, a game-state stack, RON prefabs), `cg_assets` (handles, background loading, loading states, hot reload), `cg_tiled` (Tiled maps with parallax, chunked tiles, tile animations and object prefabs), `cg_physics` (kinematic bodies with slopes, one-way platforms and moving platforms, tile and entity colliders, sensors, layers, raycasts) and `cg_anim` (Aseprite sprite sheets, animation state machines and events, tweens, CPU particles, camera follow, shake and fades) `cg_audio` (OGG and WAV sounds, streamed music with crossfades, buses with saved volume settings, positional sound) and `cg_ui` (shaped text in TTF, OTF and bitmap fonts with Arabic and right-to-left layouts, nodes with anchors, rows and columns, buttons, sliders and progress bars, keyboard, gamepad, mouse and touch navigation, on-screen touch controls, localization, and an egui debug overlay) work on desktop and web, and the platformer sample game (`games/platformer`) plays through three levels on both.
+> **Status:** Phase 10. `cg_core` (app, plugins, fixed-timestep loop, `Time`, schedules), `cg_platform` (window, fullscreen, input, actions, lifecycle, logging, asset IO and bundles, save storage), `cg_render` (`wgpu` sprites with hit flashes, camera, virtual resolutions, debug shapes, culling, image and atlas assets), `cg_world` (transforms and hierarchy, interpolation, a game-state stack, RON prefabs), `cg_assets` (handles, background loading, loading states, hot reload), `cg_tiled` (Tiled maps with parallax, chunked tiles, tile animations and object prefabs), `cg_physics` (kinematic bodies with slopes, one-way platforms and moving platforms, tile and entity colliders, sensors, layers, raycasts) and `cg_anim` (Aseprite sprite sheets, animation state machines and events, tweens, CPU particles, camera follow, shake and fades) `cg_audio` (OGG and WAV sounds, streamed music with crossfades, buses with saved volume settings, positional sound) and `cg_ui` (shaped text in TTF, OTF and bitmap fonts with Arabic and right-to-left layouts, nodes with anchors, rows and columns, buttons, sliders and progress bars, keyboard, gamepad, mouse and touch navigation, on-screen touch controls, localization, and an egui debug overlay) work on desktop and web, and the platformer sample game (`games/platformer`) plays through three levels on both. CI publishes the platformer's web release to <https://mohamedsadat.github.io/cashgear-engine/>.
 
 ## Workspace layout
 
@@ -21,7 +21,7 @@ CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WAS
 | `crates/cg_ui` | Text, game UI, touch controls, `egui` debug overlay | 8 |
 | `crates/cg_script` | Lua runtime and bindings (facade feature `script`) | 12 |
 | `games/platformer` | Sample game | 9 |
-| `tools/cg_pack` | CLI: atlas packing, asset bundling | 4 |
+| `tools/cg_pack` | CLI: atlas packing, asset bundling | 4, 10 |
 | `tools/cg_editor` | Desktop scene editor | 13 |
 | `examples/` | One runnable example per feature | from 1 |
 
@@ -35,6 +35,15 @@ cargo run -p platformer -- --demo          # a bot plays the whole game and quit
 cargo run -p platformer -- --level 2       # straight into a level
 cd games/platformer && trunk serve --port 8088   # web: open http://127.0.0.1:8088
 ```
+
+Play it in a browser at <https://mohamedsadat.github.io/cashgear-engine/>; CI publishes every green push to `main` there. The web release is built with:
+
+```sh
+cd games/platformer
+trunk build --release --no-default-features --public-url ./
+```
+
+That uses the small `web-release` profile and wasm-opt, leaves out the debug overlay, and packs `assets/` into one `assets.cgpak` (`cg_pack trunk-bundle`, a hook in `Trunk.toml`). `dist/` then holds the whole game: serve it from any static host, or zip it for itch.io (each CI run uploads that zip as the `platformer-web` artifact). The page shows a loading bar, errors with a Reload button, a "turn your phone sideways" notice on phones held upright, and has a web manifest for "Add to Home Screen".
 
 `cargo test -p platformer -- --ignored capture_screens` renders the bot's run to PNGs in `target/platformer-captures/`.
 
@@ -75,7 +84,7 @@ cd examples/audio && trunk serve --port 8086       # sound starts after a key pr
 cd examples/ui && trunk serve --port 8087          # on a phone the touch controls show by themselves
 ```
 
-Every example takes `--frames N`, `--no-vsync` and `--backend <vulkan|dx12|metal|gl|webgpu>`; on the web they go in the page URL as `?frames=N&no-vsync&backend=gl`. The asset flags are `--hot-reload` / `--no-hot-reload` (on by default in debug desktop builds), `--asset-root <path>` and `--asset-delay <seconds>` (slows loading down to try loading screens). `--physics-debug` starts with colliders drawn (F1 toggles them), `--no-audio` turns the sound off, `--touch` / `--no-touch` show or hide the on-screen touch controls, and `--overlay` opens the debug overlay (F12 toggles it).
+Every example takes `--frames N`, `--no-vsync` and `--backend <vulkan|dx12|metal|gl|webgpu>`; on the web they go in the page URL as `?frames=N&no-vsync&backend=gl`. The asset flags are `--hot-reload` / `--no-hot-reload` (on by default in debug desktop builds), `--asset-root <path>`, `--asset-delay <seconds>` (slows loading down to try loading screens) and `--bundle <path>` (reads assets from a `cg_pack bundle` file). On desktop, F11 and Alt+Enter toggle fullscreen. `--physics-debug` starts with colliders drawn (F1 toggles them), `--no-audio` turns the sound off, `--touch` / `--no-touch` show or hide the on-screen touch controls, and `--overlay` opens the debug overlay (F12 toggles it).
 
 ### Assets
 
@@ -92,6 +101,12 @@ cargo run -p cg_pack -- atlas examples/tiled_map/art/characters examples/tiled_m
 ```
 
 `--check` fails when the committed files are out of date (CI runs it).
+
+A whole asset folder can be packed into one bundle, which the engine reads before the folder (`--bundle <path>`, or on the web the page hands it over while the code loads):
+
+```sh
+cargo run -p cg_pack -- bundle games/platformer/assets platformer.cgpak
+```
 
 ## Development
 

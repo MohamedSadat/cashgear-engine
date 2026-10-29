@@ -4,7 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
     <title>CashGear: bunnymark</title>
-    <link data-trunk rel="rust" href="Cargo.toml" data-bin="bunnymark" />
+    <link
+      data-trunk
+      rel="rust"
+      href="Cargo.toml"
+      data-bin="bunnymark"
+      data-cargo-profile-release="web-release"
+      data-wasm-opt="z"
+    />
     <style>
       html,
       body {

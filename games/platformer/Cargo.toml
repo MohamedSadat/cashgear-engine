@@ -8,8 +8,13 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+default = ["overlay"]
+# The F12 debug overlay (egui). The web release leaves it out: `--no-default-features`.
+overlay = ["cashgear_engine/debug-overlay"]
+
 [dependencies]
-cashgear_engine.workspace = true
+cashgear_engine = { workspace = true, default-features = false }
 # The save file and the controls are RON through serde, like the engine's settings.
 ron.workspace = true
 serde.workspace = true

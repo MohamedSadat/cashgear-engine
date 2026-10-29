@@ -84,3 +84,77 @@ jobs:
           name: golden-${{ matrix.os }}
           path: target/golden/
           if-no-files-found: ignore
+
+  web:
+    name: web build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@0.22.1
+      - name: build the platformer for the web
+        # The web-release profile, wasm-opt, no debug overlay, and the assets in one
+        # bundle (the post_build hook in Trunk.toml). Relative URLs, so the same files work
+        # on GitHub Pages and itch.io.
+        working-directory: games/platformer
+        run: trunk build --release --no-default-features --public-url ./
+      - name: download size
+        # What a player downloads: code and text gzipped (as GitHub Pages and most hosts
+        # serve them), images and the bundle as they are (already compressed). The job
+        # fails above the 8 MB budget.
+        shell: bash
+        working-directory: games/platformer/dist
+        run: |
+          # trunk's empty lock file is not part of the game.
+          rm -f .trunk-lock
+          budget=8000000
+          total=0
+          {
+            echo "### Web download size"
+            echo
+            echo "| File | Bytes | Transferred |"
+            echo "| --- | ---: | ---: |"
+            while IFS= read -r file; do
+              bytes=$(stat -c %s "$file")
+              case "$file" in
+                *.wasm|*.js|*.mjs|*.html|*.css|*.json|*.webmanifest) sent=$(gzip -9 -c "$file" | wc -c) ;;
+                *) sent=$bytes ;;
+              esac
+              total=$((total + sent))
+              echo "| \`${file#./}\` | $bytes | $sent |"
+            done < <(find . -type f | sort)
+            echo "| **Total** | | **$total** (budget $budget) |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$total" -gt "$budget" ]; then
+            echo "::error::the web build downloads $total bytes, over the $budget budget"
+            exit 1
+          fi
+      - name: zip for itch.io
+        # The artifact's zip has index.html at its root, as itch.io wants.
+        uses: actions/upload-artifact@v7
+        with:
+          name: platformer-web
+          path: games/platformer/dist/
+      - name: pages artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: games/platformer/dist/
+
+  pages:
+    name: deploy to GitHub Pages
+    # Only a green main is published.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [fmt, check, web]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v5

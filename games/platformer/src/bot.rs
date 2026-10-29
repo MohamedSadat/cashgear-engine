@@ -9,6 +9,7 @@
 
 use crate::enemies::Enemy;
 use crate::level::BotHint;
+use crate::menus::MenuAction;
 use crate::player::{Intent, Player, SIZE};
 use crate::progress::Session;
 use crate::things::Platform;
@@ -39,6 +40,9 @@ pub(crate) fn plugin(app: &mut App) {
 enum Step {
     Wait(u32),
     Tap(&'static str),
+    /// Taps down until the button for this action has the focus (menus whose rows depend
+    /// on the platform).
+    DownTo(MenuAction),
 }
 
 /// What the bot is doing in a level.
@@ -94,9 +98,12 @@ impl Bot {
 }
 
 /// The menus: a short script for each screen as it opens.
+#[allow(clippy::too_many_arguments)]
 fn drive_menus(
     mut bot: ResMut<Bot>,
     mut input: ResMut<VirtualInput>,
+    focus: Res<UiFocus>,
+    buttons: Query<&MenuAction>,
     state: Res<State<Screen>>,
     session: Res<Session>,
     fade: Res<StateFade<Screen>>,
@@ -119,7 +126,7 @@ fn drive_menus(
     if bot.screen != Some(screen) && !fade.is_busy() {
         bot.screen = Some(screen);
         let visit = bot.visit(screen);
-        use Step::{Tap, Wait};
+        use Step::{DownTo, Tap, Wait};
         let script: Vec<Step> = match (screen, visit) {
             // Settings, then controls, then back, then play.
             (Screen::Title, 1) => vec![
@@ -129,15 +136,10 @@ fn drive_menus(
                 Tap(actions::DOWN), // Settings
                 Tap(actions::ACCEPT),
             ],
-            (Screen::Settings, 1) => vec![
-                Wait(20),
-                Tap(actions::DOWN), // Music
-                Tap(actions::DOWN), // Effects
-                Tap(actions::DOWN), // Language
-                Tap(actions::DOWN), // Touch controls
-                Tap(actions::DOWN), // Controls
-                Tap(actions::ACCEPT),
-            ],
+            // Down through every row (Fullscreen only where the platform has it).
+            (Screen::Settings, 1) => {
+                vec![Wait(20), DownTo(MenuAction::Controls), Tap(actions::ACCEPT)]
+            }
             (Screen::Controls, _) => vec![Wait(30), Tap(actions::BACK)],
             (Screen::Settings, _) => vec![Wait(10), Tap(actions::BACK)],
             (Screen::Title, 2) => vec![Wait(20), Tap(actions::ACCEPT)],
@@ -184,6 +186,14 @@ fn drive_menus(
         Step::Tap(action) => {
             input.tap(action);
             bot.wait = TAP_GAP;
+        }
+        Step::DownTo(target) => {
+            let focused = focus.get().and_then(|entity| buttons.get(entity).ok());
+            if focused != Some(&target) {
+                input.tap(actions::DOWN);
+                bot.wait = TAP_GAP;
+                bot.steps.push_front(step);
+            }
         }
     }
 }

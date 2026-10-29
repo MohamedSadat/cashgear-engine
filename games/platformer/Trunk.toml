@@ -1,0 +1,14 @@
+# Web build of the platformer.
+#
+# - `trunk serve --port 8088`: a debug build; the engine fetches asset files one by one.
+# - `trunk build --release --no-default-features --public-url ./`: the web release, as CI
+#   builds it for GitHub Pages and itch.io. The `web-release` profile and wasm-opt make the
+#   code small, `--no-default-features` leaves out the debug overlay, and the hook below
+#   packs the assets into one bundle.
+
+[[hooks]]
+# Release builds: pack assets/ into assets.cgpak next to index.html and remove the loose
+# copy. Debug builds keep the loose files.
+stage = "post_build"
+command = "cargo"
+command_arguments = ["run", "--quiet", "--package", "cg_pack", "--", "trunk-bundle"]

@@ -207,6 +207,39 @@ fn the_last_heart_ends_the_level_and_try_again_restarts_it() {
 }
 
 #[test]
+fn looking_away_pauses_a_level_but_not_the_demo() {
+    for demo in [false, true] {
+        let mut app = app(Options {
+            demo,
+            level: Some(0),
+        });
+        for _ in 0..10 {
+            frame(&mut app);
+        }
+        assert_eq!(screen(&app), Screen::Playing);
+        // A hidden browser tab, then the player comes back.
+        app.world_mut().write_message(Lifecycle::Occluded(true));
+        app.world_mut().write_message(Lifecycle::Occluded(false));
+        frame(&mut app);
+        frame(&mut app);
+        let expected = if demo {
+            Screen::Playing
+        } else {
+            Screen::Paused
+        };
+        assert_eq!(screen(&app), expected, "demo: {demo}");
+        assert_eq!(
+            app.world().resource::<Time>().time_scale(),
+            if demo { 1.0 } else { 0.0 }
+        );
+        // Losing the focus while paused changes nothing.
+        app.world_mut().write_message(Lifecycle::Focused(false));
+        frame(&mut app);
+        assert_eq!(screen(&app), expected);
+    }
+}
+
+#[test]
 fn keys_can_be_rebound_and_escape_cancels() {
     let mut app = app(Options::default());
     for _ in 0..5 {

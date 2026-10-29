@@ -46,6 +46,9 @@ js-sys = "0.3.106"
 # Audio device, mixing and buses only: sounds are decoded by symphonia directly.
 kira = { version = "0.12.6", default-features = false, features = ["cpal"] }
 log = "0.4.34"
+# Deflate for asset bundles (`cg_pack bundle` and their reader); already in the tree
+# through `tiled` (flate2).
+miniz_oxide = "0.9.1"
 notify = "8.2.1"
 pollster = "1.0.1"
 ron = "0.12.3"
@@ -77,3 +80,12 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 2
+
+# Web releases: pages pick it with `data-cargo-profile-release="web-release"`, so
+# `trunk build --release` makes the smallest code (with wasm-opt after it) while desktop
+# release builds keep full speed.
+[profile.web-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1

@@ -24,7 +24,7 @@ use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseScrollDelta, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::PhysicalKey;
-use winit::window::{Window as WinitWindow, WindowAttributes, WindowId};
+use winit::window::{Fullscreen, Window as WinitWindow, WindowAttributes, WindowId};
 
 /// Frame rate on desktop while the window is hidden or has no area. Nothing is presented
 /// then, so vsync cannot pace the loop.
@@ -138,6 +138,7 @@ impl Runner {
         {
             self.user_activated();
         }
+        self.sync_fullscreen();
         let now = Instant::now();
         let delta = self
             .last_frame
@@ -146,10 +147,71 @@ impl Runner {
 
         self.app.update(delta);
 
+        if self
+            .app
+            .world()
+            .resource::<Window>()
+            .fullscreen_request
+            .is_some()
+            && let Some(fullscreen) = self.window_mut().fullscreen_request.take()
+        {
+            self.set_fullscreen(fullscreen);
+        }
         if let Some(exit) = self.app.should_exit() {
             log::info!("exiting: {exit:?}");
+            if !exit.is_success() && cfg!(target_arch = "wasm32") {
+                crate::page::fatal("the game stopped because of an error");
+            }
             self.exit(event_loop, exit);
         }
+    }
+
+    /// Copies the window's fullscreen state into [`Window`], which also catches changes
+    /// made outside the game (Escape in a browser, the window manager).
+    fn sync_fullscreen(&mut self) {
+        let Some(window) = &self.window else {
+            return;
+        };
+        let fullscreen = window.fullscreen().is_some();
+        if self.app.world().resource::<Window>().fullscreen != fullscreen {
+            self.window_mut().fullscreen = fullscreen;
+        }
+    }
+
+    fn set_fullscreen(&mut self, fullscreen: bool) {
+        let Some(window) = &self.window else {
+            return;
+        };
+        log::info!(
+            "{} fullscreen",
+            if fullscreen { "entering" } else { "leaving" }
+        );
+        // `Window::fullscreen` follows at the start of the next frame (a browser switches a
+        // moment later).
+        window.set_fullscreen(fullscreen.then_some(Fullscreen::Borderless(None)));
+    }
+
+    /// Desktop: F11 and Alt+Enter toggle fullscreen (see [`WindowConfig::fullscreen_keys`]).
+    /// Returns whether the key was used for that, so the game does not see it too (Enter
+    /// would also press the focused menu button).
+    fn fullscreen_key(&mut self, key: KeyCode, state: ElementState, repeat: bool) -> bool {
+        if !self.config.fullscreen_keys
+            || cfg!(target_arch = "wasm32")
+            || cfg!(target_os = "android")
+        {
+            return false;
+        }
+        let alt = self
+            .app
+            .world()
+            .get_resource::<ButtonInput<KeyCode>>()
+            .is_some_and(|keys| keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]));
+        let toggle = key == KeyCode::F11 || (key == KeyCode::Enter && alt);
+        if toggle && state == ElementState::Pressed && !repeat {
+            let fullscreen = !self.app.world().resource::<Window>().fullscreen;
+            self.set_fullscreen(fullscreen);
+        }
+        toggle
     }
 
     fn pointer_position(&self, position: PhysicalPosition<f64>) -> (Vec2, Vec2) {
@@ -196,6 +258,9 @@ impl Runner {
                 let PhysicalKey::Code(key) = event.physical_key else {
                     return;
                 };
+                if self.fullscreen_key(key, event.state, event.repeat) {
+                    return;
+                }
                 if let Some(mut keys) = self
                     .app
                     .world_mut()
@@ -298,6 +363,8 @@ impl ApplicationHandler for Runner {
             // Only browsers hold sound back until the user has interacted.
             state.user_activated = !cfg!(target_arch = "wasm32");
             state.touch_screen = platform_touch_screen();
+            state.can_fullscreen = platform_can_fullscreen();
+            state.fullscreen = window.fullscreen().is_some();
             self.app
                 .world_mut()
                 .insert_resource(WindowHandle(window.clone()));
@@ -363,6 +430,10 @@ impl ApplicationHandler for Runner {
                 self.lifecycle(Lifecycle::Focused(focused));
             }
             WindowEvent::Occluded(occluded) => {
+                // A hidden browser tab gets no frames at all; without this, the first frame
+                // back would count the whole time away (clamped to a quarter second, which
+                // still lurches the game forward).
+                self.last_frame = None;
                 self.window_mut().occluded = occluded;
                 self.lifecycle(Lifecycle::Occluded(occluded));
                 self.lifecycle_changed();
@@ -452,6 +523,33 @@ fn platform_touch_screen() -> bool {
 /// Per-platform work when the window's size in physical pixels changes.
 #[cfg(not(target_arch = "wasm32"))]
 fn platform_resized(_window: &WinitWindow, _size: UVec2) {}
+
+/// Desktop windows can always go fullscreen; Android's immersive mode is Phase 11's.
+#[cfg(not(target_arch = "wasm32"))]
+fn platform_can_fullscreen() -> bool {
+    !cfg!(target_os = "android")
+}
+
+/// `document.fullscreenEnabled` (or Safari's prefixed one): false on iPhone, where only
+/// videos go fullscreen, and in frames not allowed to (an `<iframe>` without
+/// `allowfullscreen`).
+#[cfg(target_arch = "wasm32")]
+fn platform_can_fullscreen() -> bool {
+    use js_sys::Reflect;
+    use wasm_bindgen::JsValue;
+
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return false;
+    };
+    ["fullscreenEnabled", "webkitFullscreenEnabled"]
+        .iter()
+        .any(|name| {
+            Reflect::get(&document, &JsValue::from_str(name))
+                .ok()
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false)
+        })
+}
 
 /// The platform's own record of user activation, if it keeps one. Desktop has none (and
 /// needs none: the window starts activated).

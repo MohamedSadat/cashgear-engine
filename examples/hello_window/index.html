@@ -4,7 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
     <title>CashGear: hello_window</title>
-    <link data-trunk rel="rust" href="Cargo.toml" data-bin="hello_window" />
+    <link
+      data-trunk
+      rel="rust"
+      href="Cargo.toml"
+      data-bin="hello_window"
+      data-cargo-profile-release="web-release"
+      data-wasm-opt="z"
+    />
     <style>
       html,
       body {

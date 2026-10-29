@@ -2,6 +2,8 @@
 //!
 //! ```text
 //! cg_pack atlas <folder> <out.atlas.ron> [--padding N] [--extrude N] [--max-size N] [--check]
+//! cg_pack bundle <folder> <out.cgpak>
+//! cg_pack trunk-bundle
 //! ```
 //!
 //! `atlas` packs every PNG under `<folder>` into one image, written next to the atlas file
@@ -12,22 +14,35 @@
 //!
 //! Load the result with `server.load::<TextureAtlas>("atlases/items.atlas.ron")` and draw
 //! regions with `AtlasSprite`.
+//!
+//! `bundle` packs every file under `<folder>` into one asset bundle (see
+//! `cashgear_engine::platform::io::Bundle`): text, maps and fonts deflated, images and
+//! sounds stored as they are. `trunk-bundle` does the same as a trunk `post_build` hook: in
+//! release builds it bundles the page's `assets/` into `assets.cgpak` and drops the loose
+//! copy, so the page downloads one file; debug builds keep the loose files.
 
 mod atlas;
+mod bundle;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const USAGE: &str = "\
 usage: cg_pack atlas <folder> <out.atlas.ron> [options]
+       cg_pack bundle <folder> <out.cgpak>
+       cg_pack trunk-bundle
 
-Packs every PNG under <folder> into <out>.png and <out>.atlas.ron.
+atlas: packs every PNG under <folder> into <out>.png and <out>.atlas.ron.
 
-options:
   --padding N    transparent pixels between regions (default 1)
   --extrude N    repeat each region's edge N pixels outwards (default 0)
   --max-size N   largest atlas width or height (default 4096)
-  --check        fail if the outputs are missing or out of date; write nothing";
+  --check        fail if the outputs are missing or out of date; write nothing
+
+bundle: packs every file under <folder> into one asset bundle.
+
+trunk-bundle: as a trunk post_build hook, bundles the page's assets/ into assets.cgpak
+in release builds and removes the loose copy.";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -46,6 +61,11 @@ fn main() -> ExitCode {
 fn run(args: &[String]) -> Result<String, String> {
     match args.first().map(String::as_str) {
         Some("atlas") => atlas_command(&args[1..]),
+        Some("bundle") => match &args[1..] {
+            [folder, out] => bundle::write(Path::new(folder), Path::new(out)),
+            _ => Err(USAGE.into()),
+        },
+        Some("trunk-bundle") if args.len() == 1 => bundle::trunk_hook(),
         Some("--version") => Ok(format!("cg_pack {}", cashgear_engine::VERSION)),
         _ => Err(USAGE.into()),
     }

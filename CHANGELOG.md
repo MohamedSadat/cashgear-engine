@@ -3,6 +3,29 @@
 All notable changes to CashGear Engine are recorded here, one section per phase.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Phase 10 — Web build
+
+### Added
+
+- The platformer's web release: `trunk build --release --no-default-features` in `games/platformer` builds with the new `web-release` profile (opt-level `z`, LTO, one codegen unit) and wasm-opt, without the debug overlay, and packs the assets into one bundle. A loading screen with one progress bar for the code and the assets, an error panel with a Reload button (no WebGPU or WebGL2, a crash, a failed download), a "turn your phone sideways" notice in portrait that also pauses the game, landscape lock in fullscreen on Android, a web manifest and icons so "Add to Home Screen" opens it full screen in landscape, and no page scrolling, zooming or long-press menu over the game.
+- CI: a `web` job builds the release, reports the download size per file in the job summary and fails above 8 MB, and uploads the `platformer-web` artifact (a zip with `index.html` at its root, ready for itch.io). On `main`, once every job passes, the build is published to GitHub Pages.
+- `cg_platform::io::Bundle`: a whole asset folder in one file (`.cgpak`), with text, maps and fonts deflated and images and sounds stored as they are. `AssetIo` reads files from a bundle first and from the folder when the bundle lacks them: one given with `AssetIo::with_bundle` (`AssetPlugin::bundle`, `--bundle <path>`) or `with_loaded_bundle`, or on the web the one the page downloaded and handed over as `window.cashgearBundle`. Hot reloading is off while a bundle is in use.
+- `cg_pack bundle <folder> <out.cgpak>`, and `cg_pack trunk-bundle`, a trunk `post_build` hook that bundles a page's `assets/` in release builds and drops the loose copy.
+- `cg_platform::page`: the `cashgear-ready` event once the first frame is drawn and `cashgear-error` (with the message) when the game cannot go on, so a page can follow the game. The renderer and the web panic hook send them; an error exit sends `cashgear-error` too.
+- Fullscreen: `Window::fullscreen`, `set_fullscreen` and `can_fullscreen` (desktop, and browsers that allow it; not Safari on iPhone). On desktop F11 and Alt+Enter toggle it (`WindowConfig::fullscreen_keys`). The platformer's Settings has a Fullscreen row where the platform can do it.
+- The platformer pauses itself when the player looks away during a level: another window or tab, a minimized window, a click outside the game on a web page, a phone turned upright. Not in the demo.
+
+### Changed
+
+- Every example's page uses the `web-release` profile and wasm-opt for release builds.
+- The platformer's debug overlay is its default `overlay` feature, so web releases can leave egui out.
+- The platformer's bot finds the Controls button in Settings by its action, whatever rows the platform shows.
+- New dependency: miniz_oxide 0.9.1 (deflate for bundles; already in the tree through `tiled`).
+
+### Fixed
+
+- After a hidden browser tab (or a minimized window) came back, the first frame counted all the time away (clamped to a quarter second), so the game lurched forward. The clock now restarts when the window is hidden or shown.
+
 ## Phase 9 — Platformer sample game
 
 ### Added

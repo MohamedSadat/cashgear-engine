@@ -66,10 +66,11 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ///
 /// Launch flags work on desktop and, as a query string (`?frames=60&backend=gl`), on the
 /// web: `--frames N` exits after N frames, `--no-vsync` and `--backend <list>` configure
-/// the renderer, `--hot-reload`, `--no-hot-reload`, `--asset-root <path>` and
-/// `--asset-delay <seconds>` the assets, `--physics-debug` draws colliders from the
-/// start, `--no-audio` turns the sound off, `--touch` and `--no-touch` show or hide the
-/// on-screen touch controls whatever the device, and `--overlay` opens the debug overlay.
+/// the renderer, `--hot-reload`, `--no-hot-reload`, `--asset-root <path>`,
+/// `--asset-delay <seconds>` and `--bundle <path>` the assets, `--physics-debug` draws
+/// colliders from the start, `--no-audio` turns the sound off, `--touch` and `--no-touch`
+/// show or hide the on-screen touch controls whatever the device, and `--overlay` opens
+/// the debug overlay.
 ///
 /// Configure it with struct-update syntax:
 ///

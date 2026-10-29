@@ -93,11 +93,17 @@ pub struct AssetPlugin {
     /// Hold every finished load back by this many seconds, to try a loading screen on a
     /// fast disk.
     pub delay: f32,
+    /// An asset bundle (made by `cg_pack bundle`) to read files from first: a file on
+    /// desktop, a URL relative to the page on the web (see [`AssetIo::with_bundle`]). A web
+    /// page can also hand over a bundle it downloaded itself, without this. Hot reloading
+    /// is off while a bundle is in use.
+    pub bundle: Option<String>,
 }
 
 impl AssetPlugin {
-    /// Applies the launch flags `--hot-reload`, `--no-hot-reload`, `--asset-root <path>`
-    /// and `--asset-delay <seconds>` (or `?asset-delay=0.5` in the page URL).
+    /// Applies the launch flags `--hot-reload`, `--no-hot-reload`, `--asset-root <path>`,
+    /// `--asset-delay <seconds>` (or `?asset-delay=0.5` in the page URL) and
+    /// `--bundle <path>`.
     pub fn with_args(mut self, args: &Args) -> Self {
         if args.flag("hot-reload") {
             self.hot_reload = Some(true);
@@ -111,6 +117,9 @@ impl AssetPlugin {
         if let Some(delay) = args.parse("asset-delay") {
             self.delay = delay;
         }
+        if let Some(bundle) = args.value("bundle") {
+            self.bundle = Some(bundle.to_owned());
+        }
         self
     }
 }
@@ -120,8 +129,15 @@ impl Plugin for AssetPlugin {
         if !app.is_plugin_added::<WorldPlugin>() {
             app.add_plugins(WorldPlugin);
         }
-        let server = AssetServer::new(AssetIo::new(self.root.as_deref()));
-        if self.hot_reload.unwrap_or(cfg!(debug_assertions)) {
+        let mut io = AssetIo::new(self.root.as_deref());
+        if let Some(bundle) = &self.bundle {
+            io = io.with_bundle(bundle);
+        }
+        let server = AssetServer::new(io);
+        // Changed files in the folder would be read from the bundle again, unchanged.
+        if server.io().bundle().is_some() {
+            log::debug!("no hot reloading: reading from a bundle");
+        } else if self.hot_reload.unwrap_or(cfg!(debug_assertions)) {
             match server.watch_for_changes() {
                 Ok(()) => log::info!("hot reloading assets in `{}`", server.io().root()),
                 Err(IoError::Unsupported(why)) => log::debug!("no hot reloading: {why}"),

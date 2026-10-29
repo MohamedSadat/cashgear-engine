@@ -13,7 +13,8 @@ const QUIET: [(&str, LevelFilter); 3] = [
 ];
 
 /// Sends `log` records to the terminal (`env_logger`) on desktop and to the browser console
-/// on the web, where it also turns panics into readable console errors.
+/// on the web, where it also turns panics into readable console errors and tells the page
+/// (the `cashgear-error` event of [`page`](crate::page)).
 ///
 /// On desktop the `RUST_LOG` environment variable overrides [`level`](Self::level), with
 /// the usual `env_logger` syntax such as `RUST_LOG=debug,gilrs=warn`. Without it, `wgpu`'s
@@ -52,7 +53,14 @@ fn init(level: LevelFilter) {
 
 #[cfg(target_arch = "wasm32")]
 fn init(level: LevelFilter) {
-    console_error_panic_hook::set_once();
+    static HOOK: std::sync::Once = std::sync::Once::new();
+    HOOK.call_once(|| {
+        std::panic::set_hook(Box::new(|info| {
+            // The panic in the console with its message, then the page's error event.
+            console_error_panic_hook::hook(info);
+            crate::page::web::dispatch(crate::page::ERROR_EVENT, Some(&info.to_string()));
+        }));
+    });
     if log::set_boxed_logger(Box::new(ConsoleLogger { level })).is_ok() {
         log::set_max_level(level);
     }

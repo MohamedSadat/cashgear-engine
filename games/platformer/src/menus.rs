@@ -49,6 +49,7 @@ pub(crate) fn plugin(app: &mut App) {
                 on_click,
                 on_slider,
                 back_and_pause,
+                pause_when_away,
                 update_labels,
                 widget_looks,
                 click_sounds,
@@ -114,6 +115,7 @@ pub(crate) enum MenuAction {
     Back,
     Start(usize),
     TouchMode,
+    Fullscreen,
     Controls,
     Rebind(usize, usize),
     ResetControls,
@@ -128,6 +130,7 @@ pub(crate) enum MenuAction {
 enum Live {
     Language,
     TouchMode,
+    Fullscreen,
     Continue,
     Slot(usize, usize),
     LevelName(usize),
@@ -473,6 +476,7 @@ fn spawn_settings(
     art: Res<Art>,
     audio: Res<AudioSettings>,
     stack: Res<State<Screen>>,
+    window: Res<Window>,
 ) {
     // Over the pause menu the level shows through, dimmed; over the title too.
     let dim = stack.stack().len() > 1;
@@ -522,6 +526,17 @@ fn spawn_settings(
         MenuAction::TouchMode,
     );
     commands.entity(touch).insert(Live::TouchMode);
+    // Not where the platform cannot do it (Safari on iPhone, Android until Phase 11).
+    if window.can_fullscreen() {
+        let fullscreen = button(
+            &mut commands,
+            &art,
+            settings,
+            "settings.fullscreen",
+            MenuAction::Fullscreen,
+        );
+        commands.entity(fullscreen).insert(Live::Fullscreen);
+    }
     button(
         &mut commands,
         &art,
@@ -773,7 +788,7 @@ fn on_click(
     mut next: ResMut<NextState<Screen>>,
     mut fade: ResMut<StateFade<Screen>>,
     mut locale: ResMut<Locale>,
-    mut touch: ResMut<TouchControls>,
+    (mut touch, mut window): (ResMut<TouchControls>, ResMut<Window>),
     mut session: ResMut<Session>,
     progress: Res<Progress>,
     mut rebinding: ResMut<Rebinding>,
@@ -826,6 +841,11 @@ fn on_click(
                     TouchMode::Always => TouchMode::Never,
                     TouchMode::Never => TouchMode::Auto,
                 };
+            }
+            // A click is a user gesture, which browsers ask for before going fullscreen.
+            MenuAction::Fullscreen => {
+                let fullscreen = !window.fullscreen();
+                window.set_fullscreen(fullscreen);
             }
             MenuAction::Rebind(action, slot) => rebinding.start(action, slot, &mut focus),
             MenuAction::ResetControls => {
@@ -884,11 +904,36 @@ fn back_and_pause(
     }
 }
 
+/// Opens the pause menu when the player looks away during a level: another window or
+/// browser tab, a minimized window, a click outside the game's frame on a web page, or a
+/// phone turned upright (the page takes the focus off the game). Not in the demo.
+fn pause_when_away(
+    mut lifecycle: MessageReader<Lifecycle>,
+    state: Res<State<Screen>>,
+    mut next: ResMut<NextState<Screen>>,
+    fade: Res<StateFade<Screen>>,
+    session: Res<Session>,
+    options: Res<crate::Options>,
+) {
+    let away = lifecycle
+        .read()
+        .any(|event| matches!(event, Lifecycle::Focused(false) | Lifecycle::Occluded(true)));
+    if away
+        && !options.demo
+        && *state.current() == Screen::Playing
+        && session.finished.is_none()
+        && !fade.is_busy()
+    {
+        next.push(Screen::Paused);
+    }
+}
+
 /// Fills in the labels whose text changes.
 #[allow(clippy::too_many_arguments)]
 fn update_labels(
     locale: Res<Locale>,
     touch: Res<TouchControls>,
+    window: Res<Window>,
     progress: Res<Progress>,
     controls: Res<Controls>,
     rebinding: Res<Rebinding>,
@@ -933,6 +978,18 @@ fn update_labels(
                 set(
                     &mut label,
                     "settings.touch",
+                    &[("mode", locale.text(mode).to_owned())],
+                );
+            }
+            Live::Fullscreen => {
+                let mode = if window.fullscreen() {
+                    "touch.on"
+                } else {
+                    "touch.off"
+                };
+                set(
+                    &mut label,
+                    "settings.fullscreen",
                     &[("mode", locale.text(mode).to_owned())],
                 );
             }

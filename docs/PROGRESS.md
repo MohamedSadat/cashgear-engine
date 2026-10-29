@@ -16,8 +16,8 @@ This file tracks phase status, the decisions made at the start of each phase, kn
 | 7 | Audio | Done | `phase-7` |
 | 8 | Text and UI | Done | `phase-8` |
 | 9 | Platformer sample game | Done | `phase-9` |
-| 10 | Web build | Next | |
-| 11 | Android build | Not started | |
+| 10 | Web build | Done | `phase-10` |
+| 11 | Android build | Next | |
 | 12 | Lua scripting | Not started | |
 | 13 | Scene editor | Not started | |
 | 14 | Polish, performance and release | Not started | |
@@ -609,6 +609,80 @@ Other choices made during the phase:
 - Web: `cd games/platformer && trunk serve --port 8088`, open <http://127.0.0.1:8088>; on a phone the touch controls show by themselves.
 - Please read the Arabic strings in `games/platformer/assets/strings/ar.strings.ron` and correct any wording.
 
+## Phase 10 — Web build
+
+### Decisions
+
+| Question | Answer |
+| --- | --- |
+| Hosting | GitHub Pages and itch.io. CI publishes the platformer to <https://mohamedsadat.github.io/cashgear-engine/> on every push to `main` once all jobs pass, and every run uploads the `platformer-web` artifact, whose zip has `index.html` at its root, ready to upload to itch.io by hand. One build serves both: it uses relative URLs (`--public-url ./`). |
+| How assets reach the browser | One bundle file, `assets.cgpak`, made by `cg_pack` in release builds. The page starts downloading it next to the code, with one progress bar for both, and hands it to the engine. Debug builds (`trunk serve`) and desktop keep loose files and hot reloading. |
+| Download size | Under 8 MB as transferred (code and text gzipped, the bundle and images as they are). CI fails the web job above it. Measured below. |
+| Mobile browsers | Android Chrome and iOS Safari: the touch controls (Phase 8), a "turn your phone sideways" notice in portrait, a Fullscreen setting where the browser allows one (not on iPhone), landscape lock in fullscreen on Android, and a manifest so "Add to Home Screen" opens the game full screen in landscape. Checking on a real phone is the user's (see the manual checks). |
+
+Chosen without asking (said with the questions):
+
+- **Looking away pauses.** During a level, the pause menu opens when the game loses focus or is hidden: another window or tab, a minimized window, a click outside the game's frame on itch.io, a phone turned upright. Never during the demo.
+- **Fullscreen** in the engine: F11 and Alt+Enter on desktop, and a Settings row in the platformer.
+- **No debug overlay** in the web release (egui stays in debug builds and on desktop).
+- **Errors in the page**: no WebGPU or WebGL2, a panic or a failed download shows a panel with the message and a Reload button instead of a frozen canvas.
+
+Other choices made during the phase:
+
+- **Release profile.** `[profile.web-release]` inherits `release` with opt-level `z`, LTO and one codegen unit. Each page picks it with `data-cargo-profile-release="web-release"`, so `trunk build --release` makes small code while desktop release builds keep full speed. trunk runs wasm-opt in every release build unless a page says `data-wasm-opt="0"`; the pages ask for level `z`. Leaving the overlay out needs `--no-default-features` on the command line (trunk has no per-profile features); the platformer's `overlay` feature is on by default for desktop and `trunk serve`.
+- **The bundle format** (`cg_platform::io::Bundle`, version 1): a 16-byte header (magic `CGPAK\0`, version, the bundle's total size, the entry count), an index of paths with a method, offset, stored and unpacked length, then the data. Entries are deflated (miniz_oxide, level 9) when that saves at least 5%: maps, text and fonts shrink, PNG and OGG are stored. The same files always give the same bytes. The platformer's 42 files go from 2.54 MB to 2.19 MB (the Arabic font from 434 KB to about 214 KB, the maps to a tenth). The bundle stays in memory for the run, so reloads and late loads read from it.
+- **Reading through a bundle.** `AssetIo` reads from its bundle first and falls back to the folder for files the bundle lacks (and logs which bundle it uses). On the web it waits, on its first read, for the page's `window.cashgearBundle` promise (an `ArrayBuffer`, or `null` for none); reads started before it arrives wait together for one promise, and the first to wake unpacks the index. `AssetPlugin::bundle` (`--bundle <path>`) names a bundle to read on desktop or fetch on the web when the page has not handed one over. Hot reloading is off while a bundle is in use, since reloads would read the bundle again.
+- **Building the bundle.** `games/platformer/Trunk.toml` runs `cargo run -p cg_pack -- trunk-bundle` as a `post_build` hook. In release builds it packs the page's `assets/` into `assets.cgpak` in trunk's staging folder and deletes the loose copy that `copy-dir` made; debug builds keep the loose files.
+- **The loading screen** (`games/platformer/web/loader.mjs`) is trunk's `data-initializer`. trunk's loader reports the code's progress against its real size; the bundle's own header carries its size, so the bar is exact even when the host gzips the download. The page also preloads the bundle from `<head>` (`<link rel="preload" as="fetch">`), and the loader's `fetch` reuses that request. The bar shows a percentage, since it counts unpacked bytes. The screen stays until the engine's first frame (`cashgear-ready`) and the bundle have both arrived, then fades. If the page's scripts never run, an inline fallback says so after 20 seconds.
+- **Page events.** `cg_platform::page::ready` and `fatal` dispatch `cashgear-ready` and `cashgear-error` `CustomEvent`s on `window` (nothing off the web). The renderer sends `ready` after its first presented frame and `fatal` with its error; the web panic hook sends the panic message; an error exit sends a generic one. The page shows the first error it gets.
+- **Fullscreen.** `Window::set_fullscreen` asks the runner to switch after the frame; `Window::fullscreen` is read back from winit at the start of every frame, so Escape leaving a browser's fullscreen shows up too. Browsers allow fullscreen only within a few seconds of a key press, click or touch (transient activation), which a request one frame after the click is well within. `can_fullscreen` is `document.fullscreenEnabled` on the web (false on iPhone and in frames without `allowfullscreen`), true on desktop, false on Android until Phase 11. The F11 and Alt+Enter keys are handled in the runner and not passed to the game, so Alt+Enter does not also press the focused button; on the web F11 stays the browser's.
+- **Hidden tabs.** The runner restarts the frame clock when the window is hidden or shown, so a tab coming back does not run a quarter second of catch-up steps at once. The game's own pause is `menus::pause_when_away`, from `Lifecycle::Focused(false)` and `Occluded(true)`.
+- **Phones in portrait.** The notice is CSS (`orientation: portrait` and `pointer: coarse`); the loader also blurs the canvas when it shows, which pauses a level through the focus rule above. In fullscreen on a touch screen the loader asks for `screen.orientation.lock("landscape")` (Android allows it; others refuse quietly).
+- **CI.** The `web` job installs trunk 0.22.1 with `taiki-e/install-action`, builds, writes a size table to the job summary and uploads the artifacts; the `pages` job (`actions/deploy-pages`) runs on `main` after `fmt`, `check` and `web` pass. GitHub Pages serves `.wasm` gzipped (checked on another Pages site), so the budget counts the code at its gzip size.
+- **Icons.** `web/icons` holds the manifest, Apple and favicon icons, drawn from Kenney's alien and grass on a 32-pixel grid (36 for Apple's 180-pixel icon) and scaled up by whole numbers by a scratch script (not in the repository).
+- **The examples' pages** use the same profile and wasm-opt for their release builds; they keep loose assets.
+- **Versions.** miniz_oxide 0.9.1 (in the tree already through `tiled`'s flate2). Actions: `taiki-e/install-action@v2`, `actions/upload-pages-artifact@v5`, `actions/deploy-pages@v5`.
+
+### Done
+
+- `cg_platform`: `io::Bundle`, `BundleError`, `BUNDLE_MAGIC`, `BUNDLE_VERSION`; `AssetIo::with_bundle`, `with_loaded_bundle`, `bundle`; `page` (`ready`, `fatal`, `READY_EVENT`, `ERROR_EVENT`); `Window::fullscreen`, `set_fullscreen`, `can_fullscreen`; `WindowConfig::fullscreen_keys`; the clock restart on hiding; the web panic hook's error event.
+- `cg_assets`: `AssetPlugin::bundle` and `--bundle`. `cg_render`: the page events. `tools/cg_pack`: `bundle` and `trunk-bundle`.
+- `games/platformer`: the web page (loading screen, error panel, rotate notice, manifest, icons), `Trunk.toml`, the `overlay` feature, the Fullscreen setting, pausing when away, and the bot's `DownTo` step.
+- The `web-release` profile; every example page uses it.
+- 419 tests (8 more than Phase 9, one of them `Bundle`'s doc example): bundles round-tripping, compressing only what shrinks, the same bytes every time, bad and damaged bundles, reads through a bundle with the folder filling in (in memory, from a file, missing or broken), the asset server loading a file and its dependencies through a bundle, `cg_pack bundle` leaving hidden files out, and the platformer pausing when the player looks away but not in the demo. The reference PNGs are unchanged.
+- CI: the `web` and `pages` jobs.
+
+### Verified
+
+- All tests pass; fmt, clippy (desktop and wasm) and rustdoc with warnings denied are clean.
+- The release build, served the way GitHub Pages serves it (under `/cashgear-engine/`, code gzipped) by a scratch Node server. Without wasm-opt, which trunk could not download here (see the known issues), the sizes were:
+
+  | File | Bytes | Gzipped |
+  | --- | ---: | ---: |
+  | `platformer_bg.wasm` | 11,350,105 | 2,940,733 |
+  | `platformer.js` | 162,287 | 24,626 |
+  | `assets.cgpak` | 2,193,465 | (stored) |
+  | `index.html`, loader, manifest, icons | 27,000 | 13,000 |
+  | **Transferred** | | **about 5.17 MB** |
+
+  For comparison, the debug wasm is 28.3 MB, and a release build with the overlay and before wasm-bindgen was 16.7 MB (4.4 MB gzipped). CI builds with wasm-opt and reports its sizes in the job summary.
+- The app's browser pane (Chromium, visible), checked by screenshot and script: the loading screen with its bar (on a server throttled to 600 KB/s), then the title; only the code and one `assets.cgpak` request (the preload reused), no loose files; `reading assets from the bundle` in the log; 60 fps through the bot's run on WebGPU and on WebGL2 (`?backend=gl`); the Settings screen with "Fullscreen: Off"; a changed music level saved in `localStorage` (`cashgear/cashgear-platformer/audio-settings.ron`) and back after a reload; the pause menu opening when the canvas lost focus mid-level; the error panel for `?backend=vulkan` ("cannot draw to the window"); in a phone-sized view, the rotate notice in portrait and the touch controls in a landscape level.
+- Headless Chrome 156 and Edge 156 on this machine's GPU, driven by a scratch DevTools script: Chrome at 60 fps on WebGPU through the bot's run; Edge at 60 fps on WebGPU for a full minute (level 1 complete, into level 2) and at 60 fps on WebGL2 (ANGLE on Direct3D 11, the GTX 1650) while the page stayed visible (headless Edge marks a page hidden after about 20 seconds unless told not to, and the game then stops drawing, as it should); in Chrome, choosing Fullscreen in Settings with real key presses put the canvas in fullscreen and the row read "Fullscreen: On".
+- Desktop: `platformer --demo` still finishes the whole game and exits with success.
+- Not checked by me:
+  - Firefox and Safari (not installed here), and a real phone: touch, the rotate notice, fullscreen and landscape lock on Android, "Add to Home Screen" on both.
+  - Fullscreen in the app's browser pane, which never grants it; F11 and Alt+Enter on desktop (no screen access).
+  - GitHub Pages and itch.io themselves, until CI has run.
+  - The audio under load in browsers (cpal's Web Audio output on the main thread): I cannot hear.
+
+### Manual checks for the user
+
+- Once CI has passed on `main`, open <https://mohamedsadat.github.io/cashgear-engine/> in Chrome, Edge and Firefox: the loading bar, then the title at 60 fps. Play a little; switch to another tab and back: the pause menu should be open and the music paused. Settings: Fullscreen On (Escape leaves it), change a volume and reload: it is kept.
+- On a phone (Android Chrome and iPhone Safari): open the same address. Upright, the "turn your phone sideways" notice shows; sideways, the game with the d-pad, jump and pause buttons; two fingers at once should work. On Android, Settings, Fullscreen should fill the screen and stay landscape. On both, "Add to Home Screen" (Share, Add to Home Screen on iPhone) and open it from the icon: full screen, landscape.
+- itch.io: download the `platformer-web` artifact from the CI run (Actions, the run, Artifacts), upload the zip as an HTML game, tick "Mobile friendly" and "Fullscreen button", and set the viewport to 1280×720. In the embedded frame, clicking outside the game should pause it.
+- Desktop: `cargo run -p platformer`, then F11 and Alt+Enter go fullscreen and back; Settings, Fullscreen too. Alt-tab away during a level: the pause menu opens.
+- A release build locally: `cd games/platformer && trunk build --release --no-default-features`, then serve `dist/` with any static server. If trunk times out downloading wasm-opt, install binaryen so `wasm-opt` is on the PATH; trunk uses that one.
+
 ## Known issues
 
 - On the web, `AppExit` stops the loop but leaves the page; there is nowhere to exit to.
@@ -624,7 +698,7 @@ Other choices made during the phase:
 - Tilemaps are drawn at their entity's `GlobalTransform2D` without interpolation, so a map moved in fixed steps would step on fast displays. Maps normally stay put.
 - Tile chunks are cached as queued sprites on the CPU and copied into the sprite queue each frame, not kept as GPU buffers. At the example's size that is about 320 tiles a frame; revisit if a level gets much larger.
 - Browsers hide the adapter name behind WebGPU, so `RenderStats::adapter()` reads "an unnamed GPU" there.
-- With 20,000 bunnies in a debug wasm build, WebGL2 drops to 30 fps. A release web build is Phase 10's job.
+- With 20,000 bunnies in a debug wasm build, WebGL2 drops to 30 fps. Bunnymark's page now builds releases with the web profile, but that has not been measured yet (Phase 14).
 - Kinematic bodies are axis-aligned boxes and collide with every collider as its bounding box; rotated rectangles stay axis-aligned.
 - Slopes carry a body by its foot, so its corners hang over or into the hill; slopes block only from above, so their high side should meet a solid tile or another slope. Ceiling slopes (tiles flipped vertically) collide as solid blocks. A body wider than twice a slope's run climbs it by its corner.
 - Hazard tiles hurt over their whole cell, so a body jumping just over Kenney's low spikes can be hit by the empty top of the cell.
@@ -674,6 +748,14 @@ Other choices made during the phase:
 - Platformer enemies are kinematic bodies with simple rules; hoppers and walkers stay within `range` only when the map gives one, and an enemy that falls out of the level is removed.
 - The platformer loads all three maps and every sound before the title screen; music streams. Fine at this size, but a larger game would load levels on demand.
 
+- trunk gives each tool download 30 seconds; on a slow connection the wasm-opt download (binaryen) times out and the release build fails. Install binaryen so `wasm-opt` is on the PATH, or build a copy of the page with `data-wasm-opt="0"`.
+- `trunk build --release` without `--no-default-features` builds the platformer with the debug overlay (about a megabyte more). CI passes the flag.
+- The bundle has a fixed name, `assets.cgpak`. Right after a deploy, a browser or a host's cache (GitHub Pages keeps files for 10 minutes) can pair new code with the old bundle, or the reverse. A content hash in the name would fix it.
+- The whole bundle downloads before the title screen, music included (1.8 MB of its 2.2 MB), and stays in memory for the run next to the decoded assets.
+- Web fullscreen works only shortly after a key press, click or touch; a game that calls `Window::set_fullscreen` from a timer is refused, and `Window::fullscreen` turns false again. Safari on iPhone has no fullscreen for pages (`can_fullscreen` is false); "Add to Home Screen" is the way there. Landscape lock works only in fullscreen and only where the browser allows it (Android).
+- The rotate notice and the page's loading and error texts are in English (the notice also in Arabic); the page does not know the game's language.
+- On desktop, the platformer pauses whenever its window loses focus during a level, even for a moment.
+
 ## Notes for later phases
 
 - **Any phase:** `trunk` only watches the example folder, so touch the example after editing engine crates while `trunk serve` runs.
@@ -713,6 +795,10 @@ Other choices made during the phase:
 - **Phase 13:** the editor can place the platformer's objects: tile objects with classes (`Coin`, `Checkpoint`, `Spring`, `Exit`, the enemies) and `Platform` rectangles with `dx`, `dy`, `speed`, `phase`. The level script is gone; Tiled and the editor are the tools now.
 - **Phase 14:** a release of the sample game; a `cargo generate` template can start from `games/platformer`'s layout (modules by subject, a `Game` plugin the tests build without a window, a bot for CI).
 
+- **Phase 11:** an APK can carry the assets as one bundle too: read `assets.cgpak` through the APK asset manager into `AssetIo::with_loaded_bundle`, and `cg_pack bundle` can make it in the Android build. `Window::can_fullscreen` is false on Android until immersive mode; set it there. `page` events are web only. The platformer already pauses on `Lifecycle::Focused(false)` and `Occluded(true)`; check what Android sends on backgrounding.
+- **Phase 12:** keep `cg_script` out of the web build (the `script` feature); the web release's size budget is 8 MB.
+- **Phase 14:** a content-hashed bundle name (trunk hashes the code but copies the bundle as is), a service worker for offline play, and per-level bundles (or music outside the bundle, streamed) if the download grows. Measure the web build's frame time with many sprites (bunnymark's release page now uses the web profile). The CI size table is the place to watch.
+
 ## Backlog
 
 Features that came up but don't serve the platformer or a listed example go here.
@@ -722,7 +808,6 @@ Features that came up but don't serve the platformer or a listed example go here
 - Multi-threaded system execution on desktop, if profiling ever calls for it. At 10,000 entities the ECS work is about 0.6 ms a frame single-threaded.
 - Packing atlases at runtime (Phase 4 packs them with `cg_pack`), and per-load loader settings (an image's filter, say).
 - Image-collection tilesets, and isometric or hexagonal maps in `cg_tiled`.
-- Asset bundling in `cg_pack` (the plan's other `cg_pack` job) is Phase 10's.
 - `rapier2d` behind a feature, for dynamic rigid bodies (tumbling crates, ragdolls).
 - Crushing (a body squeezed between a moving collider and a wall), and platform velocity carried into jumps.
 - Partial-cell tile shapes from Tiled's tile collision editor (low spikes, half blocks), and ceiling slopes.
@@ -741,3 +826,4 @@ Features that came up but don't serve the platformer or a listed example go here
 - A `cg_pack font` command that bakes a TTF into a BMFont, for hand-editing glyph art.
 - `QueryFilter` excluding several entities.
 - Platformer extras: more levels, a double jump or dash, collectible gems, enemies that throw things, a level timer leaderboard.
+- Web: uploading to itch.io from CI with butler (needs an API key secret), a service worker for offline play, content-hashed bundle names, the page following the game's language, and cpal's AudioWorklet output (needs cross-origin isolation headers, which GitHub Pages cannot set).

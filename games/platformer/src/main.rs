@@ -157,6 +157,8 @@ impl Plugin for Game {
     fn build(&self, app: &mut App) {
         use Screen::Loading;
         app.insert_resource(self.options)
+            // The window's messages; the tests run without one.
+            .add_message::<Lifecycle>()
             .load_prefab("Dust", "prefabs/dust.prefab.ron")
             .init_state(Loading)
             .add_loading_state(Loading, Screen::Title)

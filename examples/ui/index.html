@@ -4,7 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
     <title>CashGear: ui</title>
-    <link data-trunk rel="rust" href="Cargo.toml" data-bin="ui" />
+    <link
+      data-trunk
+      rel="rust"
+      href="Cargo.toml"
+      data-bin="ui"
+      data-cargo-profile-release="web-release"
+      data-wasm-opt="z"
+    />
     <!-- The asset server fetches files from assets/ next to this page. -->
     <link data-trunk rel="copy-dir" href="assets" />
     <style>
