@@ -2,7 +2,7 @@
 
 use crate::schedule::{
     First, FixedPostUpdate, FixedPreUpdate, FixedUpdate, Last, PostUpdate, PreUpdate, Render,
-    Startup, Update,
+    Startup, StateTransition, Update,
 };
 use crate::{AppExit, Plugin, Time};
 use bevy_ecs::message::{
@@ -57,6 +57,7 @@ impl App {
             Startup.intern(),
             First.intern(),
             PreUpdate.intern(),
+            StateTransition.intern(),
             FixedPreUpdate.intern(),
             FixedUpdate.intern(),
             FixedPostUpdate.intern(),
@@ -179,6 +180,7 @@ impl App {
         world.resource_mut::<Time>().begin_frame(delta);
         world.run_schedule(First);
         world.run_schedule(PreUpdate);
+        world.run_schedule(StateTransition);
         while world.resource_mut::<Time>().expend_fixed_step() {
             world.run_schedule(FixedPreUpdate);
             world.run_schedule(FixedUpdate);
@@ -235,6 +237,7 @@ mod tests {
         app.add_systems(Startup, record("startup"))
             .add_systems(First, record("first"))
             .add_systems(PreUpdate, record("pre_update"))
+            .add_systems(StateTransition, record("state_transition"))
             .add_systems(FixedPreUpdate, record("fixed_pre_update"))
             .add_systems(FixedUpdate, record("fixed_update"))
             .add_systems(FixedPostUpdate, record("fixed_post_update"))
@@ -256,6 +259,7 @@ mod tests {
                 "startup",
                 "first",
                 "pre_update",
+                "state_transition",
                 "fixed_pre_update",
                 "fixed_update",
                 "fixed_post_update",

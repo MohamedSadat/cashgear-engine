@@ -13,9 +13,10 @@
 use cg_core::Rect;
 use cg_core::glam::{UVec2, Vec2, uvec2, vec2};
 use cg_render::{
-    Camera2D, Color, DebugShapes, Filter, Image, OffscreenRenderer, ScalingMode, Sprite, TextureId,
-    Textures,
+    Camera2D, CameraView, Color, DebugShapes, Filter, Image, OffscreenRenderer, ScalingMode,
+    Sprite, Sprites, TextureId, Textures,
 };
+use cg_world::Transform2D;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -53,17 +54,69 @@ fn renderer() -> Option<MutexGuard<'static, OffscreenRenderer>> {
 
 fn render(
     size: UVec2,
-    camera: &Camera2D,
+    view: &CameraView,
     textures: &Textures,
-    sprites: &[Sprite],
+    sprites: &[Draw],
     shapes: &DebugShapes,
 ) -> Option<Image> {
     let mut renderer = renderer()?;
+    let mut queue = Sprites::default();
+    for draw in sprites {
+        queue.draw_on(draw.layer, draw.sprite, draw.transform);
+    }
     Some(
         renderer
-            .render(size, camera, textures, sprites, shapes)
+            .render(size, view, textures, &queue, shapes)
             .expect("render"),
     )
+}
+
+/// One sprite to queue: its look, transform and layer, with builder methods so each scene
+/// reads as a list.
+#[derive(Clone, Copy)]
+struct Draw {
+    sprite: Sprite,
+    transform: Transform2D,
+    layer: i32,
+}
+
+impl Draw {
+    fn new(sprite: Sprite) -> Self {
+        Self {
+            sprite,
+            transform: Transform2D::IDENTITY,
+            layer: 0,
+        }
+    }
+
+    fn of(texture: TextureId) -> Self {
+        Self::new(Sprite::new(texture))
+    }
+
+    fn at(mut self, x: f32, y: f32) -> Self {
+        self.transform.translation = vec2(x, y);
+        self
+    }
+
+    fn rotation(mut self, radians: f32) -> Self {
+        self.transform.rotation = radians;
+        self
+    }
+
+    fn scale(mut self, scale: Vec2) -> Self {
+        self.transform.scale = scale;
+        self
+    }
+
+    fn layer(mut self, layer: i32) -> Self {
+        self.layer = layer;
+        self
+    }
+
+    fn sprite(mut self, change: impl FnOnce(&mut Sprite)) -> Self {
+        change(&mut self.sprite);
+        self
+    }
 }
 
 fn workspace_dir() -> PathBuf {
@@ -136,13 +189,13 @@ fn quadrants() -> Image {
     })
 }
 
-fn camera(scaling: ScalingMode) -> Camera2D {
-    Camera2D {
+fn camera(scaling: ScalingMode) -> CameraView {
+    CameraView::new(Camera2D {
         scaling,
         clear_color: Color::hex(0x202430),
         bar_color: Color::hex(0x000000),
         ..Camera2D::default()
-    }
+    })
 }
 
 /// Sprites exercising every `Sprite` field, on a 160×90 pixel grid.
@@ -159,76 +212,41 @@ fn sprites() {
         }),
         Filter::Linear,
     );
-    let at = |x: f32, y: f32| Sprite {
-        position: vec2(x, y),
-        ..Sprite::new(quad)
-    };
+    let at = |x: f32, y: f32| Draw::of(quad).at(x, y);
     let sprites = [
         // Top row: plain, flipped x, flipped y, both, a source quarter scaled up.
         at(-64.0, 28.0),
-        Sprite {
-            flip_x: true,
-            ..at(-48.0, 28.0)
-        },
-        Sprite {
-            flip_y: true,
-            ..at(-32.0, 28.0)
-        },
-        Sprite {
-            flip_x: true,
-            flip_y: true,
-            ..at(-16.0, 28.0)
-        },
-        Sprite {
-            source: Some(Rect::new(4.0, 0.0, 8.0, 4.0)),
-            scale: Vec2::splat(3.0),
-            ..at(8.0, 28.0)
-        },
+        at(-48.0, 28.0).sprite(|s| s.flip_x = true),
+        at(-32.0, 28.0).sprite(|s| s.flip_y = true),
+        at(-16.0, 28.0).sprite(|s| (s.flip_x, s.flip_y) = (true, true)),
+        at(8.0, 28.0)
+            .sprite(|s| s.source = Some(Rect::new(4.0, 0.0, 8.0, 4.0)))
+            .scale(Vec2::splat(3.0)),
         // A linear-filtered gradient, stretched.
-        Sprite {
-            size: Some(vec2(24.0, 16.0)),
-            ..at(44.0, 26.0)
-        }
-        .with_texture(gradient),
+        Draw::of(gradient)
+            .at(44.0, 26.0)
+            .sprite(|s| s.size = Some(vec2(24.0, 16.0))),
         // Middle row: rotation, a bottom-left pivot, a tint, half transparency.
-        Sprite {
-            rotation: core::f32::consts::FRAC_PI_4,
-            scale: Vec2::splat(2.0),
-            ..at(-56.0, -4.0)
-        },
-        Sprite {
-            pivot: Vec2::ZERO,
-            scale: Vec2::splat(2.0),
-            ..at(-36.0, -12.0)
-        },
-        Sprite {
-            color: Color::hex(0x60ffff),
-            scale: Vec2::splat(2.0),
-            ..at(-4.0, -4.0)
-        },
-        Sprite {
-            size: Some(vec2(28.0, 10.0)),
-            color: Color::WHITE.with_alpha(0.5),
-            ..Sprite::new(TextureId::WHITE)
-        }
+        at(-56.0, -4.0)
+            .rotation(core::f32::consts::FRAC_PI_4)
+            .scale(Vec2::splat(2.0)),
+        at(-36.0, -12.0)
+            .sprite(|s| s.pivot = Vec2::ZERO)
+            .scale(Vec2::splat(2.0)),
+        at(-4.0, -4.0)
+            .sprite(|s| s.color = Color::hex(0x60ffff))
+            .scale(Vec2::splat(2.0)),
+        Draw::new(Sprite::solid(
+            Color::WHITE.with_alpha(0.5),
+            vec2(28.0, 10.0),
+        ))
         .at(-4.0, -4.0),
         // Bottom row: layers beat queue order, then texture grouping within a layer.
-        Sprite {
-            layer: 2,
-            size: Some(vec2(12.0, 12.0)),
-            color: Color::hex(0xff00ff),
-            ..Sprite::new(TextureId::WHITE)
-        }
-        .at(30.0, -30.0),
-        Sprite {
-            layer: 1,
-            scale: Vec2::splat(2.0),
-            ..at(24.0, -26.0)
-        },
-        Sprite {
-            scale: vec2(-2.0, 2.0),
-            ..at(52.0, -26.0)
-        },
+        Draw::new(Sprite::solid(Color::hex(0xff00ff), vec2(12.0, 12.0)))
+            .at(30.0, -30.0)
+            .layer(2),
+        at(24.0, -26.0).scale(Vec2::splat(2.0)).layer(1),
+        at(52.0, -26.0).scale(vec2(-2.0, 2.0)),
     ];
     let Some(image) = render(
         uvec2(160, 90),
@@ -251,12 +269,8 @@ fn pixel_perfect() {
     let mut cam = camera(ScalingMode::PixelPerfect(uvec2(64, 36)));
     cam.position = vec2(0.4, 0.3);
     let sprites = [
-        Sprite::new(quad).at(-10.3, 4.6),
-        Sprite {
-            rotation: 0.4,
-            ..Sprite::new(quad)
-        }
-        .at(12.0, -6.0),
+        Draw::of(quad).at(-10.3, 4.6),
+        Draw::of(quad).at(12.0, -6.0).rotation(0.4),
     ];
     let mut shapes = DebugShapes::default();
     shapes.line(vec2(-30.0, -15.0), vec2(30.0, 15.0), Color::GREEN);
@@ -272,13 +286,9 @@ fn letterbox_and_stretch() {
     let mut textures = Textures::default();
     let quad = textures.add(quadrants());
     let sprites = [
-        Sprite {
-            rotation: 0.3,
-            scale: Vec2::splat(2.0),
-            ..Sprite::new(quad)
-        },
-        Sprite::new(quad).at(-28.0, 14.0),
-        Sprite::new(quad).at(28.0, -14.0),
+        Draw::of(quad).rotation(0.3).scale(Vec2::splat(2.0)),
+        Draw::of(quad).at(-28.0, 14.0),
+        Draw::of(quad).at(28.0, -14.0),
     ];
     for (name, scaling) in [
         ("letterbox", ScalingMode::Letterbox(uvec2(64, 36))),
@@ -304,9 +314,9 @@ fn camera_transform() {
     let quad = textures.add(quadrants());
     let mut cam = camera(ScalingMode::WindowSize);
     cam.position = vec2(8.0, 4.0);
-    cam.zoom = 2.0;
+    cam.camera.zoom = 2.0;
     cam.rotation = core::f32::consts::FRAC_PI_6;
-    let sprites = [Sprite::new(quad), Sprite::new(quad).at(16.0, 8.0)];
+    let sprites = [Draw::of(quad), Draw::of(quad).at(16.0, 8.0)];
     let mut shapes = DebugShapes::default();
     shapes.circle(Vec2::ZERO, 2.0, Color::WHITE);
     let Some(image) = render(uvec2(96, 64), &cam, &textures, &sprites, &shapes) else {
@@ -350,11 +360,7 @@ fn snapped_sprites_cover_whole_pixels() {
     let textures = Textures::default();
     let cam = camera(ScalingMode::PixelPerfect(uvec2(32, 18)));
     for offset in [0.0, 0.25, 0.5, 0.75, 0.999] {
-        let sprites = [Sprite {
-            size: Some(vec2(4.0, 3.0)),
-            ..Sprite::new(TextureId::WHITE)
-        }
-        .at(offset, -offset)];
+        let sprites = [Draw::new(Sprite::solid(Color::WHITE, vec2(4.0, 3.0))).at(offset, -offset)];
         let Some(image) = render(
             uvec2(32, 18),
             &cam,
@@ -384,15 +390,8 @@ fn snapped_sprites_cover_whole_pixels() {
 fn srgb_colours_and_linear_blending() {
     let textures = Textures::default();
     let mut cam = camera(ScalingMode::WindowSize);
-    cam.clear_color = Color::BLACK;
-    let solid = |color: Color, x: f32| {
-        Sprite {
-            size: Some(vec2(8.0, 8.0)),
-            color,
-            ..Sprite::new(TextureId::WHITE)
-        }
-        .at(x, 0.0)
-    };
+    cam.camera.clear_color = Color::BLACK;
+    let solid = |color: Color, x: f32| Draw::new(Sprite::solid(color, vec2(8.0, 8.0))).at(x, 0.0);
     let sprites = [
         solid(Color::rgb8(128, 64, 200), -8.0),
         solid(Color::WHITE.with_alpha(0.5), 8.0),
@@ -414,20 +413,49 @@ fn srgb_colours_and_linear_blending() {
     assert!(close(right, [188, 188, 188, 255]), "{right:?}");
 }
 
-trait SpriteExt {
-    fn at(self, x: f32, y: f32) -> Self;
-    fn with_texture(self, texture: TextureId) -> Self;
-}
+/// A parent's transform reaches its children's sprites: an ECS scene rendered through the
+/// same queue matches the hand-placed one.
+#[test]
+fn hierarchy_matches_hand_placed_sprites() {
+    use cg_core::App;
+    use cg_core::ecs::hierarchy::ChildOf;
+    use cg_world::{GlobalTransform2D, WorldPlugin};
+    use core::time::Duration;
 
-impl SpriteExt for Sprite {
-    fn at(self, x: f32, y: f32) -> Self {
-        Self {
-            position: vec2(x, y),
-            ..self
-        }
-    }
+    let mut textures = Textures::default();
+    let quad = textures.add(quadrants());
+    let mut app = App::new();
+    app.add_plugins(WorldPlugin);
+    let parent = app
+        .world_mut()
+        .spawn(Transform2D::from_xy(-10.0, 2.0).with_rotation(0.5))
+        .id();
+    let child = app
+        .world_mut()
+        .spawn((
+            Transform2D::from_xy(12.0, 0.0).with_scale(Vec2::splat(2.0)),
+            ChildOf(parent),
+        ))
+        .id();
+    app.update(Duration::ZERO);
+    let global = *app.world().get::<GlobalTransform2D>(child).unwrap();
 
-    fn with_texture(self, texture: TextureId) -> Self {
-        Self { texture, ..self }
-    }
+    let view = camera(ScalingMode::PixelPerfect(uvec2(64, 36)));
+    let mut from_ecs = Sprites::default();
+    from_ecs.draw(Sprite::new(quad), global);
+    let by_hand = [Draw::of(quad)
+        .at(-10.0 + 12.0 * 0.5f32.cos(), 2.0 + 12.0 * 0.5f32.sin())
+        .rotation(0.5)
+        .scale(Vec2::splat(2.0))];
+    let Some(mut renderer) = renderer() else {
+        return;
+    };
+    let size = uvec2(64, 36);
+    let shapes = DebugShapes::default();
+    let ecs_image = renderer
+        .render(size, &view, &textures, &from_ecs, &shapes)
+        .unwrap();
+    drop(renderer);
+    let hand_image = render(size, &view, &textures, &by_hand, &shapes).unwrap();
+    assert_eq!(ecs_image.data(), hand_image.data());
 }

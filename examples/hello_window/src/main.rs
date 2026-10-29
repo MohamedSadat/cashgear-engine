@@ -90,7 +90,8 @@ fn action_map() -> ActionMap {
         .bind("quit", KeyCode::Escape)
 }
 
-fn hello(window: Res<Window>, gamepads: Res<Gamepads>, time: Res<Time>) {
+fn hello(mut commands: Commands, window: Res<Window>, gamepads: Res<Gamepads>, time: Res<Time>) {
+    commands.spawn(Camera2D::default());
     info!(
         "hello_window running on CashGear {}: {:.0}x{:.0} logical pixels, \
          fixed step {:.2} ms, {} gamepad(s)",
@@ -208,35 +209,32 @@ fn draw(
     time: Res<Time>,
     player: Res<Player>,
     window: Res<Window>,
-    mut camera: ResMut<Camera2D>,
+    camera: Single<(&Camera2D, &mut Transform2D)>,
     mut sprites: ResMut<Sprites>,
 ) {
     let drawn = player.previous.lerp(player.position, time.alpha());
     // Keep the ground near the bottom of the view and the player in the middle.
-    camera.position = vec2(drawn.x, 120.0);
+    let (settings, mut transform) = camera.into_inner();
+    transform.translation = vec2(drawn.x, 120.0);
 
-    let view = camera.visible_rect(&window);
+    let view =
+        CameraView::from_transform(settings.clone(), transform.affine()).visible_rect(&window);
     let stripe = 32.0;
     let first = (view.min.x / stripe).floor() as i32;
     let last = (view.max.x / stripe).ceil() as i32;
     for i in first..last {
         let color = if i % 2 == 0 { 0x3a3f4b } else { 0x323641 };
-        sprites.draw(Sprite {
-            position: vec2(i as f32 * stripe, 0.0),
-            size: Some(vec2(stripe, 48.0)),
+        let tile = Sprite {
             pivot: vec2(0.0, 1.0),
-            color: Color::hex(color),
-            ..default()
-        });
+            ..Sprite::solid(Color::hex(color), vec2(stripe, 48.0))
+        };
+        sprites.draw(tile, Transform2D::from_xy(i as f32 * stripe, 0.0));
     }
-    sprites.draw(Sprite {
-        position: drawn,
-        size: Some(vec2(16.0, 24.0)),
+    let player = Sprite {
         pivot: vec2(0.5, 0.0),
-        color: Color::hex(0xffbe0b),
-        layer: 1,
-        ..default()
-    });
+        ..Sprite::solid(Color::hex(0xffbe0b), vec2(16.0, 24.0))
+    };
+    sprites.draw_on(1, player, Transform2D::from_translation(drawn));
 }
 
 fn quit(actions: Res<ActionState>, mut exit: MessageWriter<AppExit>) {

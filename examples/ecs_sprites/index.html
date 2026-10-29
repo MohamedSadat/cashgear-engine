@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>CashGear: ecs_sprites</title>
+    <link data-trunk rel="rust" href="Cargo.toml" data-bin="ecs_sprites" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+      /* The canvas fills the page; the engine sizes its drawing buffer to match. */
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        outline: none;
+        touch-action: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="cashgear"></canvas>
+  </body>
+</html>

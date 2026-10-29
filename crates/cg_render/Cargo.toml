@@ -14,8 +14,10 @@ bevy_ecs.workspace = true
 bytemuck.workspace = true
 cg_core.workspace = true
 cg_platform.workspace = true
+cg_world.workspace = true
 image.workspace = true
 log.workspace = true
+serde.workspace = true
 wgpu.workspace = true
 
 # On the web, wgpu tries WebGPU first and falls back to WebGL2. There are no threads on
@@ -25,6 +27,7 @@ wgpu = { workspace = true, features = ["webgl", "fragile-send-sync-non-atomic-wa
 
 [dev-dependencies]
 pollster.workspace = true
+ron.workspace = true
 
 [lints]
 workspace = true

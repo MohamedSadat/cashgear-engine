@@ -1,10 +1,15 @@
-//! The 2D camera, its virtual-resolution [`ScalingMode`]s and world/screen conversion.
+//! The 2D camera: the [`Camera2D`] component, its virtual-resolution [`ScalingMode`]s, the
+//! resolved [`CameraView`] with world/screen conversion, and the [`MainCamera`] system
+//! parameter.
 
 use crate::Color;
-use bevy_ecs::resource::Resource;
+use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemParam;
 use cg_core::Rect;
-use cg_core::glam::{Mat4, Quat, UVec2, Vec2, Vec3};
+use cg_core::glam::{Affine2, Mat4, Quat, UVec2, Vec2, Vec3};
 use cg_platform::Window;
+use cg_world::{GlobalTransform2D, Transform2D};
+use serde::{Deserialize, Serialize};
 
 /// The default virtual resolution: 640×360, which scales by a whole number to 720p (2×),
 /// 1080p (3×), 1440p (4×) and 4K (6×).
@@ -14,7 +19,9 @@ pub const DEFAULT_VIRTUAL_RESOLUTION: UVec2 = UVec2::new(640, 360);
 const MIN_ZOOM: f32 = 1e-4;
 
 /// How the camera's view is fitted to the window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// In RON: `PixelPerfect((320, 180))`, `Letterbox((640, 360))`, `WindowSize`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScalingMode {
     /// One world unit is one logical pixel, so the view grows with the window.
     WindowSize,
@@ -38,31 +45,44 @@ impl Default for ScalingMode {
     }
 }
 
-/// The 2D camera: what part of the world is drawn and how it fits the window.
+/// A 2D camera. Spawn an entity with it; the entity's transform places the camera:
+/// translation is the world point at the centre of the view, rotation turns the view
+/// (the world appears to turn the other way), and scale is ignored (use `zoom`).
 ///
-/// The world is y-up, and the camera's `position` is the centre of the view. Screen
-/// positions (as in [`Pointers`](cg_platform::input::Pointers)) are logical pixels from the
-/// window's top-left corner, y down.
+/// The renderer draws through the one active camera. With several active cameras it picks
+/// the one with the lowest entity index and warns once; with none, it uses a default
+/// camera at the origin.
 ///
 /// ```
 /// use cg_core::prelude::*;
 /// use cg_render::{Camera2D, ScalingMode};
+/// use cg_world::{Interpolated, Transform2D};
 ///
-/// fn follow(mut camera: ResMut<Camera2D>) {
-///     camera.position = vec2(120.0, 40.0);
-///     camera.zoom = 2.0;
-///     camera.scaling = ScalingMode::PixelPerfect(uvec2(320, 180));
+/// fn spawn_camera(mut commands: Commands) {
+///     commands.spawn((
+///         Camera2D {
+///             zoom: 2.0,
+///             scaling: ScalingMode::PixelPerfect(uvec2(320, 180)),
+///             ..default()
+///         },
+///         Transform2D::from_xy(120.0, 40.0),
+///         // Follows something that moves in `FixedUpdate`, so draw it smoothly too.
+///         Interpolated::default(),
+///     ));
 /// }
 /// ```
-#[derive(Resource, Debug, Clone, PartialEq)]
+///
+/// The world is y-up. Screen positions (as in
+/// [`Pointers`](cg_platform::input::Pointers)) are logical pixels from the window's
+/// top-left corner, y down; [`MainCamera`] converts between them.
+///
+/// In prefabs every field is optional: `"Camera2D": (zoom: 2)`.
+#[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[require(Transform2D)]
+#[serde(default)]
 pub struct Camera2D {
-    /// The world point at the centre of the view.
-    pub position: Vec2,
     /// Magnification: 2 shows half as much of the world, twice as large.
     pub zoom: f32,
-    /// Counter-clockwise rotation of the camera, in radians. The world appears to turn the
-    /// other way.
-    pub rotation: f32,
     /// How the view is fitted to the window.
     pub scaling: ScalingMode,
     /// The background colour inside the view.
@@ -73,18 +93,20 @@ pub struct Camera2D {
     /// into (the virtual resolution in [`ScalingMode::PixelPerfect`], the window otherwise).
     /// This keeps pixel art from shimmering or doubling texels. On by default.
     pub pixel_snap: bool,
+    /// Whether the renderer may draw through this camera. On by default; turn it off to
+    /// keep a camera around unused.
+    pub active: bool,
 }
 
 impl Default for Camera2D {
     fn default() -> Self {
         Self {
-            position: Vec2::ZERO,
             zoom: 1.0,
-            rotation: 0.0,
             scaling: ScalingMode::default(),
             clear_color: Color::hex(0x1d1f24),
             bar_color: Color::BLACK,
             pixel_snap: true,
+            active: true,
         }
     }
 }
@@ -147,6 +169,58 @@ impl Camera2D {
             }
         }
     }
+}
+
+/// A camera's settings together with where it is: everything needed to draw a frame or
+/// convert between world and screen positions.
+///
+/// The renderer builds one from the active [`Camera2D`] each frame; [`MainCamera`] builds
+/// one for game code; the [`OffscreenRenderer`](crate::OffscreenRenderer) takes one
+/// directly.
+///
+/// ```
+/// use cg_core::prelude::*;
+/// use cg_render::{Camera2D, CameraView};
+///
+/// let view = CameraView {
+///     position: vec2(100.0, 50.0),
+///     ..CameraView::new(Camera2D::default())
+/// };
+/// assert_eq!(view.camera.zoom, 1.0);
+/// ```
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CameraView {
+    /// The camera's settings.
+    pub camera: Camera2D,
+    /// The world point at the centre of the view.
+    pub position: Vec2,
+    /// Counter-clockwise rotation of the camera, in radians.
+    pub rotation: f32,
+}
+
+impl CameraView {
+    /// A view through `camera` from the origin, unrotated.
+    pub fn new(camera: Camera2D) -> Self {
+        Self {
+            camera,
+            position: Vec2::ZERO,
+            rotation: 0.0,
+        }
+    }
+
+    /// A view through `camera` placed by a world transform (its scale is ignored).
+    pub fn from_transform(camera: Camera2D, transform: Affine2) -> Self {
+        Self {
+            camera,
+            position: transform.translation,
+            rotation: transform.matrix2.x_axis.to_angle(),
+        }
+    }
+
+    /// The viewport for a render target; see [`Camera2D::viewport`].
+    pub fn viewport(&self, target_size: UVec2, scale_factor: f32) -> Viewport {
+        self.camera.viewport(target_size, scale_factor)
+    }
 
     /// The matrix from world coordinates to clip space for a view spanning `world_size`
     /// world units (see [`Viewport::world_size`]).
@@ -177,7 +251,12 @@ impl Camera2D {
     /// The world-space bounding box of what the camera shows in `window`. With rotation it
     /// is the box around the turned view.
     pub fn visible_rect(&self, window: &Window) -> Rect {
-        let viewport = self.viewport(window.physical_size(), window.scale_factor() as f32);
+        self.visible_rect_in(window.physical_size(), window.scale_factor() as f32)
+    }
+
+    /// The world-space bounding box of what the camera shows in a render target.
+    pub fn visible_rect_in(&self, target_size: UVec2, scale_factor: f32) -> Rect {
+        let viewport = self.viewport(target_size, scale_factor);
         let half = viewport.world_size * 0.5;
         let (sin, cos) = self.rotation.sin_cos();
         let extent = Vec2::new(
@@ -209,33 +288,109 @@ impl Camera2D {
     }
 }
 
+/// Picks the camera the renderer uses: the active one with the lowest entity index (entity
+/// ordering itself is not by index). Returns it and whether other active cameras were
+/// passed over.
+pub(crate) fn pick_active<'a, T>(
+    cameras: impl Iterator<Item = (Entity, &'a Camera2D, T)>,
+) -> (Option<(Entity, &'a Camera2D, T)>, bool) {
+    let mut picked: Option<(Entity, &Camera2D, T)> = None;
+    let mut several = false;
+    for camera in cameras.filter(|(_, camera, _)| camera.active) {
+        match &picked {
+            Some((entity, ..)) => {
+                several = true;
+                if camera.0.index_u32() < entity.index_u32() {
+                    picked = Some(camera);
+                }
+            }
+            None => picked = Some(camera),
+        }
+    }
+    (picked, several)
+}
+
+/// The active camera, for game code: where it is and how to convert between world and
+/// screen positions. It uses the camera's [`GlobalTransform2D`], so moves made this frame
+/// count after [`PostUpdate`](cg_core::PostUpdate).
+///
+/// ```
+/// use cg_core::prelude::*;
+/// use cg_platform::input::Pointers;
+/// use cg_render::MainCamera;
+///
+/// fn aim(camera: MainCamera, pointers: Res<Pointers>) {
+///     if let Some(pointer) = pointers.primary() {
+///         let target = camera.screen_to_world(pointer.position());
+///         info!("aiming at {target}");
+///     }
+/// }
+/// ```
+#[derive(SystemParam)]
+pub struct MainCamera<'w, 's> {
+    cameras: Query<'w, 's, (Entity, &'static Camera2D, &'static GlobalTransform2D)>,
+    window: Res<'w, Window>,
+}
+
+impl MainCamera<'_, '_> {
+    /// The active camera's entity, if there is one.
+    pub fn entity(&self) -> Option<Entity> {
+        pick_active(self.cameras.iter())
+            .0
+            .map(|(entity, ..)| entity)
+    }
+
+    /// The active camera's view, or a default camera at the origin if there is none.
+    pub fn view(&self) -> CameraView {
+        match pick_active(self.cameras.iter()).0 {
+            Some((_, camera, transform)) => CameraView::from_transform(camera.clone(), transform.0),
+            None => CameraView::default(),
+        }
+    }
+
+    /// The screen position (logical pixels from the window's top-left) of a world point.
+    pub fn world_to_screen(&self, world: Vec2) -> Vec2 {
+        self.view().world_to_screen(world, &self.window)
+    }
+
+    /// The world point under a screen position (logical pixels from the window's top-left).
+    pub fn screen_to_world(&self, screen: Vec2) -> Vec2 {
+        self.view().screen_to_world(screen, &self.window)
+    }
+
+    /// The world-space bounding box of what the camera shows.
+    pub fn visible_rect(&self) -> Rect {
+        self.view().visible_rect(&self.window)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use cg_core::glam::{uvec2, vec2};
 
-    fn camera(scaling: ScalingMode) -> Camera2D {
-        Camera2D {
+    fn view(scaling: ScalingMode) -> CameraView {
+        CameraView::new(Camera2D {
             scaling,
             ..Camera2D::default()
-        }
+        })
     }
 
     #[test]
     fn pixel_perfect_uses_whole_scales_and_centres() {
-        let viewport = camera(ScalingMode::default()).viewport(uvec2(1920, 1080), 1.0);
+        let viewport = view(ScalingMode::default()).viewport(uvec2(1920, 1080), 1.0);
         assert_eq!(viewport.rect, Rect::new(0.0, 0.0, 1920.0, 1080.0));
         assert_eq!(viewport.render_size, uvec2(640, 360));
 
         // 2.5× fits; 2× is used and the rest is bars.
-        let viewport = camera(ScalingMode::default()).viewport(uvec2(1600, 1000), 1.0);
+        let viewport = view(ScalingMode::default()).viewport(uvec2(1600, 1000), 1.0);
         assert_eq!(viewport.rect, Rect::new(160.0, 140.0, 1440.0, 860.0));
         assert_eq!(viewport.world_size, vec2(640.0, 360.0));
     }
 
     #[test]
     fn pixel_perfect_shrinks_when_the_window_is_small() {
-        let viewport = camera(ScalingMode::default()).viewport(uvec2(320, 360), 1.0);
+        let viewport = view(ScalingMode::default()).viewport(uvec2(320, 360), 1.0);
         assert_eq!(viewport.rect.size(), vec2(320.0, 180.0));
         assert_eq!(viewport.render_size, uvec2(640, 360));
     }
@@ -243,60 +398,97 @@ mod tests {
     #[test]
     fn letterbox_keeps_the_aspect_ratio() {
         let mode = ScalingMode::Letterbox(uvec2(640, 360));
-        let viewport = camera(mode).viewport(uvec2(1000, 1000), 1.0);
+        let viewport = view(mode).viewport(uvec2(1000, 1000), 1.0);
         assert_eq!(viewport.rect, Rect::new(0.0, 219.0, 1000.0, 781.0));
         assert_eq!(viewport.render_size, uvec2(1000, 562));
     }
 
     #[test]
     fn window_size_and_stretch_fill_the_target() {
-        let viewport = camera(ScalingMode::WindowSize).viewport(uvec2(800, 600), 2.0);
+        let viewport = view(ScalingMode::WindowSize).viewport(uvec2(800, 600), 2.0);
         assert_eq!(viewport.world_size, vec2(400.0, 300.0));
-        let viewport = camera(ScalingMode::Stretch(uvec2(100, 100))).viewport(uvec2(800, 600), 2.0);
+        let viewport = view(ScalingMode::Stretch(uvec2(100, 100))).viewport(uvec2(800, 600), 2.0);
         assert_eq!(viewport.world_size, vec2(100.0, 100.0));
         assert_eq!(viewport.rect.size(), vec2(800.0, 600.0));
     }
 
     #[test]
     fn zoom_shrinks_the_world_view() {
-        let mut cam = camera(ScalingMode::default());
-        cam.zoom = 2.0;
+        let mut view = view(ScalingMode::default());
+        view.camera.zoom = 2.0;
         assert_eq!(
-            cam.viewport(uvec2(1280, 720), 1.0).world_size,
+            view.viewport(uvec2(1280, 720), 1.0).world_size,
             vec2(320.0, 180.0)
         );
     }
 
     #[test]
     fn world_and_screen_round_trip() {
-        let mut cam = camera(ScalingMode::Letterbox(uvec2(640, 360)));
-        cam.position = vec2(50.0, -20.0);
-        cam.zoom = 1.5;
-        cam.rotation = 0.3;
+        let mut view = view(ScalingMode::Letterbox(uvec2(640, 360)));
+        view.position = vec2(50.0, -20.0);
+        view.camera.zoom = 1.5;
+        view.rotation = 0.3;
         let target = uvec2(1000, 700);
         for point in [vec2(0.0, 0.0), vec2(55.0, -10.0), vec2(-100.0, 80.0)] {
-            let pixel = cam.world_to_target(point, target, 1.0);
-            let back = cam.target_to_world(pixel, target, 1.0);
+            let pixel = view.world_to_target(point, target, 1.0);
+            let back = view.target_to_world(pixel, target, 1.0);
             assert!(back.distance(point) < 1e-3, "{point} -> {pixel} -> {back}");
         }
     }
 
     #[test]
     fn screen_is_y_down_from_the_top_left() {
-        let cam = camera(ScalingMode::PixelPerfect(uvec2(640, 360)));
+        let view = view(ScalingMode::PixelPerfect(uvec2(640, 360)));
         let target = uvec2(1280, 720);
         // The camera centre is the screen centre; up in the world is up on screen.
         assert_eq!(
-            cam.world_to_target(Vec2::ZERO, target, 1.0),
+            view.world_to_target(Vec2::ZERO, target, 1.0),
             vec2(640.0, 360.0)
         );
         assert_eq!(
-            cam.world_to_target(vec2(-320.0, 180.0), target, 1.0),
+            view.world_to_target(vec2(-320.0, 180.0), target, 1.0),
             vec2(0.0, 0.0)
         );
         assert_eq!(
-            cam.target_to_world(vec2(1280.0, 720.0), target, 1.0),
+            view.target_to_world(vec2(1280.0, 720.0), target, 1.0),
             vec2(320.0, -180.0)
         );
+    }
+
+    #[test]
+    fn views_come_from_transforms() {
+        let transform = Transform2D::from_xy(10.0, 20.0)
+            .with_rotation(0.5)
+            .with_scale(vec2(3.0, 3.0));
+        let view = CameraView::from_transform(Camera2D::default(), transform.affine());
+        assert_eq!(view.position, vec2(10.0, 20.0));
+        assert!((view.rotation - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_active_camera_with_the_lowest_index_wins() {
+        let mut world = World::new();
+        let off = Camera2D {
+            active: false,
+            ..Camera2D::default()
+        };
+        let a = world.spawn_empty().id();
+        let b = world.spawn_empty().id();
+        let c = world.spawn_empty().id();
+        let on = Camera2D::default();
+        let cameras = [(c, &on, ()), (a, &off, ()), (b, &on, ())];
+        let (picked, several) = pick_active(cameras.into_iter());
+        assert_eq!(picked.map(|(e, ..)| e), Some(b));
+        assert!(several);
+        assert!(pick_active([(a, &off, ())].into_iter()).0.is_none());
+    }
+
+    #[test]
+    fn camera_reads_from_ron_with_defaults() {
+        let camera: Camera2D =
+            ron::from_str("(zoom: 2, scaling: PixelPerfect((320, 180)))").unwrap();
+        assert_eq!(camera.zoom, 2.0);
+        assert_eq!(camera.scaling, ScalingMode::PixelPerfect(uvec2(320, 180)));
+        assert!(camera.active && camera.pixel_snap);
     }
 }

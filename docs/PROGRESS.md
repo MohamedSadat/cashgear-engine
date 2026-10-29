@@ -9,8 +9,8 @@ This file tracks phase status, the decisions made at the start of each phase, kn
 | 0 | Repository and workspace | Done | `phase-0` |
 | 1 | Platform layer and game loop | Done | `phase-1` |
 | 2 | Renderer core | Done | `phase-2` |
-| 3 | ECS and scenes | Next | |
-| 4 | Assets and tilemaps | Not started | |
+| 3 | ECS and scenes | Done | `phase-3` |
+| 4 | Assets and tilemaps | Next | |
 | 5 | Collision and physics | Not started | |
 | 6 | Animation and effects | Not started | |
 | 7 | Audio | Not started | |
@@ -151,19 +151,83 @@ Other choices made during the phase:
 - If you have a high-DPI display or a second GPU, check bunnymark there too (`--backend dx12` / `vulkan` / `gl`).
 - Web: `cd examples/bunnymark && trunk serve --port 8081`, then open <http://127.0.0.1:8081> and <http://127.0.0.1:8081/?backend=gl> in Chrome, Edge and Firefox.
 
+## Phase 3 — ECS and scenes
+
+### Decisions
+
+| Question | Answer |
+| --- | --- |
+| `bevy_ecs` or `hecs` | `bevy_ecs` 0.20, settled in Phase 1. The hierarchy is bevy's own `ChildOf`/`Children`. |
+| Camera in the ECS | `Camera2D` is a component on an entity whose transform places it. The renderer draws through one active camera (lowest entity index if several are active, with a warning). Multiple cameras and split screen go to the backlog. |
+| Prefab format and `bevy_reflect` | A serde registry, no reflection. Components register under a short name; prefabs list them by name with nested children, and missing fields take their defaults. Textures are named until Phase 4's asset paths. `bevy_reflect` waits for the editor (Phase 13), where it would drive the inspector. |
+| Game states | An engine-written stack over the game's own enum: `push`, `pop`, `replace`, `set`; `OnEnter`, `OnExit`, `OnPause`, `OnResume`; `in_state` (top only) and `state_in_stack` run conditions; `StateScoped` entities. |
+| Interpolation | Opt-in `Interpolated` component. Entities without it draw where they are. |
+
+Other choices made during the phase:
+
+- **Transforms.** `Transform2D` holds translation, rotation (radians) and scale; `GlobalTransform2D` is an `Affine2`, so skew from non-uniformly scaled parents is exact. Propagation runs before and after each fixed step and in `PostUpdate`. All three runs share one "last propagated" tick (`TransformPropagation`), so each change is computed once. Gameplay in `FixedUpdate` sees globals as of the start of the step. Parents without a `Transform2D` stop propagation.
+- **Interpolation details.** The snapshot is taken in `FixedPreUpdate` after a propagation, so entities spawned in `Startup` or `OnEnter` do not blend in from the origin. Children of an interpolated entity are drawn relative to its blended transform, so a hat on an interpolated player moves smoothly without its own `Interpolated`. Turns under about 3 degrees per step blend as matrices (cheaper; at most 0.03% shrink), larger turns are decomposed.
+- **State transitions.** A new `StateTransition` schedule in `cg_core` runs after `PreUpdate`, before the fixed steps. The initial state's `OnEnter` runs in the first frame's transition, after `Startup`. During an `OnExit`, the exiting state is still current. Changes requested from enter schedules apply in the same frame (at most 64 a frame).
+- **Prefab mechanics.** Plain components (`Clone + Serialize + Deserialize`) register with `register_component`. Components that resolve names at spawn time, such as `Sprite` and its texture name, implement `PrefabComponent` and register with `register_prefab_component`. Parsing goes through `erased-serde` (0.4.11, a small dtolnay crate) so each component is read straight from the RON text with its own serde impl. That keeps enums and newtypes exact, which `ron::Value` would lose. Errors carry line and column; a component that fails at spawn time is skipped and logged, and the rest of the prefab still spawns. `Prefabs` stores RON text and parses it on first use, so registration order does not matter. Prefabs serialize back to RON (round-trip tested) for the editor later.
+- **Sprites.** `Sprite` is now the component (texture, size, source, pivot, colour, flips). `Layer` is a separate component; `Visibility` (Inherited, Visible, Hidden) computes `InheritedVisibility` down the hierarchy. The immediate-mode queue stays: `Sprites::draw(sprite, transform)` and `draw_on(layer, ...)` push `QueuedSprite`s with an `Affine2`.
+- **Queueing and culling.** In `Render`, `RenderSystems::Queue` picks the camera, builds the `FrameView`, and queues each visible sprite entity whose world bounding box overlaps the camera's visible rectangle. `RenderSystems::Draw` then draws. `RenderStats::culled` counts what was skipped.
+- **`CameraView` and `MainCamera`.** `CameraView` is a camera's settings plus position and rotation; it carries the world/screen maths and is what `OffscreenRenderer` takes. `MainCamera` is a system parameter giving game code `screen_to_world`, `world_to_screen` and `visible_rect` for the active camera.
+- **Draw order.** Still layer, then texture within a layer. No z or y-sort key yet; the platformer can use layers. See known issues.
+- **Dev profile.** The workspace's own crates now build with `opt-level = 1` in dev (dependencies stay at 2). bevy's generic query code is compiled into our crates, and at opt-level 0 the 10,000-entity bunnymark ran at 9 fps; at 1 it runs at about 390 fps uncapped. A full rebuild of the workspace crates takes about 20 s.
+- **Example art.** `ecs_sprites` reuses two of bunnymark's original bunnies; the hat, star, ground and cloud are drawn in code.
+
+### Done
+
+- `cg_world`: `Transform2D`, `GlobalTransform2D`, propagation, `Interpolated` and `InterpolatedTransforms`, the state stack, `StateScoped`, prefabs (`PrefabRegistry`, `Prefab`, `Prefabs`, `PrefabComponent`, `spawn_prefab`), `WorldPlugin`, `AppWorldExt` and a prelude.
+- `cg_core`: the `StateTransition` schedule; `Rect::overlaps`, `Rect::from_points`, serde for `Rect`.
+- `cg_render`: `Sprite`, `Layer`, `Visibility`/`InheritedVisibility` and `Camera2D` components; `CameraView`, `MainCamera`, `FrameView`, `RenderSystems`; culling; texture names; serde for `Color`, `ScalingMode` and `Camera2D`.
+- `examples/ecs_sprites` (with a trunk page and `--demo`), `bunnymark --ecs`, and `hello_window` on the camera entity.
+- 153 tests (54 new), including a golden test that an ECS hierarchy renders the same pixels as hand-placed sprites. The six existing reference PNGs are unchanged.
+- CI: `bunnymark --frames 120 --ecs` and `ecs_sprites --frames 480 --demo`.
+
+### Verified
+
+- All tests, including the golden images, pass on Vulkan (GTX 1650) and on WARP (software Direct3D 12).
+- Desktop (Windows, Vulkan): `ecs_sprites --demo` runs menu, playing, paused, playing and menu without warnings at 60 fps. The log shows bunnies spawned from the prefab, caught and despawned with their hats (entity counts go back down), and 45 to 60 sprites culled outside the view.
+- Desktop, bunnymark at 10,000 sprites, uncapped (`--no-vsync`), Vulkan on a GTX 1650:
+
+  | Build | Immediate mode | Entities (`--ecs`) |
+  | --- | --- | --- |
+  | Release | about 750 fps (1.33 ms) | about 520 fps (1.92 ms) |
+  | Dev | about 600 fps (1.67 ms) | about 390 fps (2.6 ms) |
+
+  So the ECS path (propagation, interpolation, visibility, culling and queueing) costs about 0.6 ms per frame for 10,000 moving entities in release. Both modes hold 60 fps with vsync.
+- Web (`trunk serve`, the app's browser pane, debug wasm), checked by screenshot: the menu logo with its orbiting star ring, the level with ground, clouds, the hatted player and falling hatted bunnies, and the pause overlay centred on the camera. `?demo` runs every transition at 60 fps on WebGPU and on WebGL2 (`?backend=gl`, ANGLE on Direct3D 11).
+- Not checked by me: the desktop window by screenshot (screen access was declined this session), and keyboard and gamepad play. See the manual checks.
+
+### Manual checks for the user
+
+- Desktop: `cargo run -p ecs_sprites`. In the menu the stars should orbit the big bunny. Press Enter to play: run with A/D or the arrows, jump with Space, and catch falling bunnies. Click to drop bunnies at the pointer, and press V to hide the player and its hat together. Escape pauses: the level should freeze under a dim overlay with a pause sign. Escape resumes; Q from the pause goes back to the menu, and Q in the menu quits.
+- On a monitor faster than 60 Hz, the player, bunnies and camera should move smoothly (they are interpolated).
+- `cargo run -p bunnymark --release -- --ecs --no-vsync` against the same command without `--ecs`, to compare the ECS cost on your machine.
+- Web: `cd examples/ecs_sprites && trunk serve --port 8082`, then open <http://127.0.0.1:8082> (and `?demo`, `?backend=gl`).
+
 ## Known issues
 
 - On the web, `AppExit` stops the loop but leaves the page; there is nowhere to exit to.
-- Within one layer, sprites are grouped by texture, so overlapping sprites with different textures draw in texture order, not queue order. Use layers when the order matters. Phase 3's ECS sorting can add a y-sort or z key.
+- Within one layer, sprites are grouped by texture, so overlapping sprites with different textures draw in texture order, not queue or spawn order. Use `Layer` when the order matters. A z or y-sort key can be added if the platformer needs one.
+- Moving an `Interpolated` entity in `Update` instead of `FixedUpdate` draws it blended between its last fixed-step position and the new one. Move interpolated entities in fixed steps, or call `Interpolated::reset`.
+- A child whose parent has no `Transform2D` keeps a stale `GlobalTransform2D`. Give every parent in a hierarchy a transform.
+- Prefab files are embedded with `include_str!` and parsed on first spawn; there is no file loading or hot reload until Phase 4.
+- `MainCamera` uses the camera's un-interpolated transform, so pointer picking can be off by up to one fixed step of camera motion.
 - `Textures` keeps every image in CPU memory as well as on the GPU, so a lost device can re-upload. Phase 4's asset server should decide whether to drop CPU copies.
 - Browsers hide the adapter name behind WebGPU, so `RenderStats::adapter()` reads "an unnamed GPU" there.
 - With 20,000 bunnies in a debug wasm build, WebGL2 drops to 30 fps. A release web build is Phase 10's job.
 
 ## Notes for later phases
 
-- **Phase 3:** `Sprite`, `Camera2D` and the `ScalingMode` settings become components or resources that feed `Sprites`. Keep `Sprites::draw` for immediate-mode drawing. Frustum culling can use `Camera2D::visible_rect`. Add a stable sort key (`z` or y-sort) if layers alone are too coarse.
-- **Phase 3:** keep `App::add_systems` and the schedule labels (`Render` now exists). Add game states, and multi-threaded execution on desktop if profiling calls for it. Decide on `bevy_reflect` (the editor needs it).
 - **Phase 4:** textures should come from the asset server as `Handle<Image>`; `Textures` and `TextureId` can become the GPU side of it. `Image::from_png` is the decode step to reuse. `trunk` only watches the example folder, so touch the example after editing engine crates while `trunk serve` runs.
+- **Phase 4:** prefabs become assets. `Prefabs::add_ron` and lazy parsing are the hook: load the text through the asset IO, then re-parse on change for hot reload. `SpriteData::texture` turns from a texture name into an asset path, resolved in `PrefabComponent::from_data` (which already gets the `World`).
+- **Phase 4:** Tiled object layers can spawn entities by type through the same `PrefabRegistry`: map a Tiled class to a prefab name and custom properties to component fields.
+- **Phase 4:** tile layers should not be one entity per tile; draw cached chunk meshes or queue chunks straight into `Sprites`. The ground in `ecs_sprites` is 80 entities, which is fine there but would not scale to a level.
+- **Phase 5:** physics should run in `FixedUpdate` on `Transform2D` and use `Interpolated` for drawing. Order collision before `TransformSystems::Propagate` in `FixedPostUpdate`, or read `Transform2D` directly.
+- **Phase 6:** camera follow, shake and zoom tweens should move the camera entity in `FixedUpdate` with `Interpolated`, as `ecs_sprites` does.
+- **Phase 13:** add `bevy_reflect` derives for the inspector; keep serde for prefab files. `Prefab::to_ron` already writes prefabs, but capturing a live entity back into a prefab still needs a `to_data` direction on `PrefabComponent`.
 - **Phase 6:** particles can reuse the sprite batcher (white texture, tint). Flash-on-hit and outline effects need a second sprite pipeline or a shader parameter in the instance data.
 - **Phase 8:** egui will need its own pass after the debug shapes. `Painter::render` is the place to add it.
 - **Phase 10:** measure a release wasm build (`trunk build --release`, `wasm-opt`). The debug wasm is about 10 MB.
@@ -176,4 +240,6 @@ Other choices made during the phase:
 
 Features that came up but don't serve the platformer or a listed example go here.
 
-- (empty)
+- Several cameras drawn at once (split screen, minimap), each with its own viewport and order.
+- A z or y-sort key within a layer.
+- Multi-threaded system execution on desktop, if profiling ever calls for it. At 10,000 entities the ECS work is about 0.6 ms a frame single-threaded.

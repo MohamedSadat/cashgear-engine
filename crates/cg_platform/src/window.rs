@@ -63,6 +63,18 @@ impl Default for Window {
 }
 
 impl Window {
+    /// A focused, running window of the given size, for tests and tools that work without
+    /// a real window. The runner keeps the real one up to date.
+    pub fn with_size(physical_size: UVec2, scale_factor: f64) -> Self {
+        Self {
+            physical_size,
+            scale_factor,
+            focused: true,
+            occluded: false,
+            suspended: false,
+        }
+    }
+
     /// Size in physical pixels (what the renderer draws).
     pub fn physical_size(&self) -> UVec2 {
         self.physical_size

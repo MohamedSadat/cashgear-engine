@@ -18,7 +18,7 @@ pub use plugin::Plugin;
 pub use rect::Rect;
 pub use schedule::{
     First, FixedPostUpdate, FixedPreUpdate, FixedUpdate, Last, PostUpdate, PreUpdate, Render,
-    Startup, Update,
+    Startup, StateTransition, Update,
 };
 pub use time::{DEFAULT_FIXED_HZ, DEFAULT_MAX_DELTA, DEFAULT_MAX_FIXED_STEPS, Time};
 
@@ -37,7 +37,7 @@ pub fn default<T: Default>() -> T {
 pub mod prelude {
     pub use crate::schedule::{
         First, FixedPostUpdate, FixedPreUpdate, FixedUpdate, Last, PostUpdate, PreUpdate, Render,
-        Startup, Update,
+        Startup, StateTransition, Update,
     };
     pub use crate::{App, AppExit, Plugin, Rect, Time, default};
     pub use bevy_ecs::prelude::*;

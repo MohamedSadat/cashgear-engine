@@ -8,5 +8,16 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[dependencies]
+# Direct dependency so bevy's derive macros (`Component`, `Resource`) can find `bevy_ecs`.
+bevy_ecs.workspace = true
+cg_core.workspace = true
+# Prefabs deserialize each component through the registry while parsing the file.
+erased-serde.workspace = true
+glam = { workspace = true, features = ["serde"] }
+log.workspace = true
+ron.workspace = true
+serde.workspace = true
+
 [lints]
 workspace = true

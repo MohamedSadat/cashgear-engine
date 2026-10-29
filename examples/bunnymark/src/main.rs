@@ -1,13 +1,19 @@
 //! `bunnymark`: thousands of bouncing bunnies, to measure the sprite batcher.
 //!
 //! - Desktop: `cargo run -p bunnymark --release`. Flags: `--bunnies N` (default 10000),
-//!   `--no-vsync` to see the uncapped frame rate, `--backend gl` (or `vulkan`, `dx12`,
-//!   `metal`) to pick the graphics API, and `--frames N` to exit after N frames.
+//!   `--ecs` to make every bunny an entity, `--no-vsync` to see the uncapped frame rate,
+//!   `--backend gl` (or `vulkan`, `dx12`, `metal`) to pick the graphics API, and
+//!   `--frames N` to exit after N frames.
 //! - Web: run `trunk serve` in `examples/bunnymark` and open <http://127.0.0.1:8081>. The
-//!   same flags go in the URL: `?bunnies=20000&backend=gl` forces WebGL2.
+//!   same flags go in the URL: `?bunnies=20000&backend=gl` forces WebGL2, `?ecs` uses
+//!   entities.
 //!
 //! The bunnies move at 60 Hz in `FixedUpdate` and are drawn interpolated, four textures
-//! in four batches. Stats are logged once a second (the browser console on the web).
+//! in four batches. By default they live in one resource and are queued in immediate mode,
+//! which measures the batcher alone. With `--ecs` each bunny is an entity with a `Sprite`,
+//! a `Transform2D` and `Interpolated`, which adds transform propagation, interpolation and
+//! culling to the measurement. Stats are logged once a second (the browser console on the
+//! web).
 //!
 //! | Input | Does |
 //! | --- | --- |
@@ -35,6 +41,7 @@ const BUNNY_PNGS: [&[u8]; 4] = [
     include_bytes!("../assets/bunny_brown.png"),
 ];
 
+/// A bunny in immediate mode.
 struct Bunny {
     position: Vec2,
     previous: Vec2,
@@ -42,30 +49,53 @@ struct Bunny {
     texture: TextureId,
 }
 
+/// A bunny's velocity in ECS mode; its position is its `Transform2D`.
+#[derive(Component)]
+struct Body {
+    velocity: Vec2,
+}
+
 #[derive(Resource, Default)]
 struct Bunnies {
+    /// Whether bunnies are entities (`--ecs`) rather than entries in `list`.
+    ecs: bool,
     list: Vec<Bunny>,
     textures: Vec<TextureId>,
+    /// Bunnies created so far, to cycle through the textures.
+    spawned: usize,
     /// Bunnies to create once the textures exist.
     pending: usize,
     rng: Rng,
 }
 
 impl Bunnies {
-    fn spawn(&mut self, at: Vec2, count: usize) {
+    fn spawn(&mut self, commands: &mut Commands, at: Vec2, count: usize) {
         for _ in 0..count {
-            let texture = self.textures[self.list.len() % self.textures.len()];
+            let texture = self.textures[self.spawned % self.textures.len()];
+            self.spawned += 1;
             let direction = if self.rng.next() < 0.5 { -1.0 } else { 1.0 };
             let velocity = vec2(
                 direction * self.rng.range(60.0, 300.0),
                 self.rng.range(-100.0, 300.0),
             );
-            self.list.push(Bunny {
-                position: at,
-                previous: at,
-                velocity,
-                texture,
-            });
+            if self.ecs {
+                commands.spawn((
+                    Sprite {
+                        pivot: vec2(0.5, 0.0),
+                        ..Sprite::new(texture)
+                    },
+                    Transform2D::from_translation(at),
+                    Interpolated::default(),
+                    Body { velocity },
+                ));
+            } else {
+                self.list.push(Bunny {
+                    position: at,
+                    previous: at,
+                    velocity,
+                    texture,
+                });
+            }
         }
     }
 }
@@ -112,12 +142,19 @@ fn main() {
             ..default()
         })
         .insert_resource(Bunnies {
+            ecs: args.flag("ecs"),
             pending: args.parse("bunnies").unwrap_or(10_000),
             ..default()
         })
         .init_resource::<Status>()
         .add_systems(Startup, setup)
-        .add_systems(FixedUpdate, bounce)
+        .add_systems(
+            FixedUpdate,
+            (
+                bounce.run_if(|b: Res<Bunnies>| !b.ecs),
+                bounce_entities.run_if(|b: Res<Bunnies>| b.ecs),
+            ),
+        )
         .add_systems(
             Update,
             (add_and_remove, camera_and_debug, draw, report).chain(),
@@ -125,7 +162,8 @@ fn main() {
         .run();
 }
 
-fn setup(mut textures: ResMut<Textures>, mut bunnies: ResMut<Bunnies>) {
+fn setup(mut commands: Commands, mut textures: ResMut<Textures>, mut bunnies: ResMut<Bunnies>) {
+    commands.spawn(Camera2D::default());
     for png in BUNNY_PNGS {
         let image = Image::from_png(png).expect("bunny PNGs are valid");
         bunnies.textures.push(textures.add(image));
@@ -137,59 +175,100 @@ fn setup(mut textures: ResMut<Textures>, mut bunnies: ResMut<Bunnies>) {
             bunnies.rng.range(-0.5, 0.5) * ARENA.x,
             bunnies.rng.range(-0.5, 0.5) * ARENA.y,
         );
-        bunnies.spawn(at, 1);
+        bunnies.spawn(&mut commands, at, 1);
     }
+    let mode = if bunnies.ecs {
+        "entities"
+    } else {
+        "immediate mode"
+    };
     info!(
-        "bunnymark: {count} bunnies. Hold the mouse to add more, Up/Down for ±{STEP}, M for \
-         scaling modes, wheel/Q/E/R for the camera, Space for debug shapes"
+        "bunnymark: {count} bunnies ({mode}). Hold the mouse to add more, Up/Down for \
+         ±{STEP}, M for scaling modes, wheel/Q/E/R for the camera, Space for debug shapes"
     );
 }
 
-/// Gameplay at 60 Hz: gravity and bounces off the arena's edges.
+/// One fixed step of a bunny: gravity and bounces off the arena's edges.
+fn step(position: &mut Vec2, velocity: &mut Vec2, dt: f32, rng: &mut Rng) {
+    let half = ARENA * 0.5;
+    velocity.y += GRAVITY * dt;
+    *position += *velocity * dt;
+    if position.x.abs() > half.x {
+        velocity.x = -velocity.x;
+        position.x = position.x.clamp(-half.x, half.x);
+    }
+    if position.y < -half.y {
+        position.y = -half.y;
+        velocity.y = -velocity.y * 0.85;
+        if rng.next() < 0.5 {
+            velocity.y += rng.range(0.0, 360.0);
+        }
+    } else if position.y > half.y {
+        position.y = half.y;
+        velocity.y = 0.0;
+    }
+}
+
+/// Leans into the jump, facing the way the bunny runs.
+fn lean(velocity: Vec2) -> f32 {
+    (velocity.y * 0.0006 * velocity.x.signum()).clamp(-0.3, 0.3)
+}
+
+/// Gameplay at 60 Hz, immediate mode.
 fn bounce(time: Res<Time>, mut bunnies: ResMut<Bunnies>) {
     let dt = time.fixed_delta_secs();
-    let half = ARENA * 0.5;
     let Bunnies { list, rng, .. } = &mut *bunnies;
     for bunny in list.iter_mut() {
         bunny.previous = bunny.position;
-        bunny.velocity.y += GRAVITY * dt;
-        bunny.position += bunny.velocity * dt;
+        step(&mut bunny.position, &mut bunny.velocity, dt, rng);
+    }
+}
 
-        if bunny.position.x.abs() > half.x {
-            bunny.velocity.x = -bunny.velocity.x;
-            bunny.position.x = bunny.position.x.clamp(-half.x, half.x);
-        }
-        if bunny.position.y < -half.y {
-            bunny.position.y = -half.y;
-            bunny.velocity.y = -bunny.velocity.y * 0.85;
-            if rng.next() < 0.5 {
-                bunny.velocity.y += rng.range(0.0, 360.0);
-            }
-        } else if bunny.position.y > half.y {
-            bunny.position.y = half.y;
-            bunny.velocity.y = 0.0;
-        }
+/// Gameplay at 60 Hz, one entity per bunny.
+fn bounce_entities(
+    time: Res<Time>,
+    mut bunnies: ResMut<Bunnies>,
+    mut query: Query<(&mut Transform2D, &mut Body, &mut Sprite)>,
+) {
+    let dt = time.fixed_delta_secs();
+    for (mut transform, mut body, mut sprite) in &mut query {
+        step(
+            &mut transform.translation,
+            &mut body.velocity,
+            dt,
+            &mut bunnies.rng,
+        );
+        transform.rotation = lean(body.velocity);
+        sprite.flip_x = body.velocity.x < 0.0;
     }
 }
 
 /// The pointer adds bunnies where it is held; Up and Down add and remove a thousand.
 fn add_and_remove(
+    mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     pointers: Res<Pointers>,
-    window: Res<Window>,
-    camera: Res<Camera2D>,
+    camera: MainCamera,
     mut bunnies: ResMut<Bunnies>,
+    entities: Query<Entity, With<Body>>,
 ) {
     for pointer in pointers.iter().filter(|p| p.pressed()) {
-        let at = camera.screen_to_world(pointer.position(), &window);
-        bunnies.spawn(at.clamp(-ARENA * 0.5, ARENA * 0.5), SPAWN_PER_FRAME);
+        let at = camera.screen_to_world(pointer.position());
+        bunnies.spawn(
+            &mut commands,
+            at.clamp(-ARENA * 0.5, ARENA * 0.5),
+            SPAWN_PER_FRAME,
+        );
     }
     if keys.just_pressed(KeyCode::ArrowUp) {
-        bunnies.spawn(vec2(-ARENA.x * 0.5, ARENA.y * 0.5), STEP);
+        bunnies.spawn(&mut commands, vec2(-ARENA.x * 0.5, ARENA.y * 0.5), STEP);
     }
     if keys.just_pressed(KeyCode::ArrowDown) {
         let keep = bunnies.list.len().saturating_sub(STEP);
         bunnies.list.truncate(keep);
+        for entity in entities.iter().take(STEP) {
+            commands.entity(entity).despawn();
+        }
     }
 }
 
@@ -198,11 +277,12 @@ fn camera_and_debug(
     keys: Res<ButtonInput<KeyCode>>,
     pointers: Res<Pointers>,
     time: Res<Time>,
-    mut camera: ResMut<Camera2D>,
+    camera: Single<(&mut Camera2D, &mut Transform2D)>,
     mut debug: ResMut<DebugShapes>,
     mut status: ResMut<Status>,
     mut exit: MessageWriter<AppExit>,
 ) {
+    let (mut camera, mut transform) = camera.into_inner();
     if keys.just_pressed(KeyCode::Escape) {
         exit.write(AppExit::Success);
     }
@@ -221,12 +301,15 @@ fn camera_and_debug(
     }
     let turn =
         f32::from(i8::from(keys.pressed(KeyCode::KeyQ)) - i8::from(keys.pressed(KeyCode::KeyE)));
-    camera.rotation += turn * time.raw_delta_secs();
+    if turn != 0.0 {
+        transform.rotate(turn * time.raw_delta_secs());
+    }
     if keys.just_pressed(KeyCode::KeyR) {
         *camera = Camera2D {
             scaling: camera.scaling,
             ..default()
         };
+        *transform = Transform2D::IDENTITY;
     }
     if keys.just_pressed(KeyCode::Space) {
         status.show_debug = !status.show_debug;
@@ -234,39 +317,46 @@ fn camera_and_debug(
     debug.set_enabled(status.show_debug);
 }
 
-/// Queues every bunny, interpolated between its last two fixed steps.
+/// Queues every immediate-mode bunny, interpolated between its last two fixed steps, and
+/// the debug shapes.
 fn draw(
     time: Res<Time>,
     bunnies: Res<Bunnies>,
     pointers: Res<Pointers>,
-    window: Res<Window>,
-    camera: Res<Camera2D>,
+    camera: MainCamera,
+    entities: Query<&Transform2D, With<Body>>,
     mut sprites: ResMut<Sprites>,
     mut debug: ResMut<DebugShapes>,
 ) {
     let alpha = time.alpha();
-    sprites.extend(bunnies.list.iter().map(|bunny| Sprite {
-        texture: bunny.texture,
-        position: bunny.previous.lerp(bunny.position, alpha),
-        pivot: vec2(0.5, 0.0),
-        // Lean into the jump, and face the way the bunny runs.
-        rotation: (bunny.velocity.y * 0.0006 * bunny.velocity.x.signum()).clamp(-0.3, 0.3),
-        flip_x: bunny.velocity.x < 0.0,
-        ..default()
-    }));
+    for bunny in &bunnies.list {
+        let sprite = Sprite {
+            pivot: vec2(0.5, 0.0),
+            flip_x: bunny.velocity.x < 0.0,
+            ..Sprite::new(bunny.texture)
+        };
+        let at = bunny.previous.lerp(bunny.position, alpha);
+        sprites.draw(
+            sprite,
+            Transform2D::from_translation(at).with_rotation(lean(bunny.velocity)),
+        );
+    }
 
     if debug.enabled() {
         debug.rect(Rect::from_center_size(Vec2::ZERO, ARENA), Color::YELLOW);
-        for bunny in bunnies.list.iter().take(50) {
-            let at = bunny.previous.lerp(bunny.position, alpha);
+        let positions = bunnies
+            .list
+            .iter()
+            .map(|bunny| bunny.previous.lerp(bunny.position, alpha))
+            .chain(entities.iter().map(|transform| transform.translation));
+        for at in positions.take(50) {
             debug.rect(
                 Rect::from_min_size(at - vec2(9.0, 0.0), vec2(18.0, 24.0)),
                 Color::GREEN,
             );
         }
         if let Some(pointer) = pointers.primary() {
-            let at = camera.screen_to_world(pointer.position(), &window);
-            debug.circle(at, 8.0, Color::RED);
+            debug.circle(camera.screen_to_world(pointer.position()), 8.0, Color::RED);
         }
     }
 }
@@ -274,6 +364,7 @@ fn draw(
 fn report(
     time: Res<Time>,
     bunnies: Res<Bunnies>,
+    entities: Query<(), With<Body>>,
     stats: Res<RenderStats>,
     mut status: ResMut<Status>,
 ) {
@@ -283,12 +374,14 @@ fn report(
     }
     status.last_report = elapsed;
     info!(
-        "{} bunnies: {:.0} fps ({:.2} ms), {} sprites in {} batches, {} draw calls, {} on {}",
-        bunnies.list.len(),
+        "{} bunnies: {:.0} fps ({:.2} ms), {} sprites in {} batches, {} culled, {} draw calls, \
+         {} on {}",
+        bunnies.list.len() + entities.iter().count(),
         stats.fps(),
         stats.frame_time().as_secs_f64() * 1000.0,
         stats.sprites(),
         stats.batches(),
+        stats.culled(),
         stats.draw_calls(),
         stats.backend(),
         stats.adapter(),

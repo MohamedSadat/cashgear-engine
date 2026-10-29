@@ -3,6 +3,32 @@
 All notable changes to CashGear Engine are recorded here, one section per phase.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Phase 3 — ECS and scenes
+
+### Added
+
+- `cg_world`: `Transform2D` (translation, rotation, scale) and `GlobalTransform2D`, propagated down bevy's `ChildOf`/`Children` hierarchy with change detection before and after each fixed step and in `PostUpdate` (`TransformSystems::Propagate`).
+- `cg_world`: the opt-in `Interpolated` component. Entities moved in `FixedUpdate` are drawn between their last two fixed steps, children included; `Interpolated::reset` skips the blend after a teleport. `InterpolatedTransforms` gives the drawn transform of any entity.
+- `cg_world`: a game-state stack over the game's own enum: `init_state`, `State` (current state and stack), `NextState` (`push`, `pop`, `replace`, `set`), the `OnEnter`, `OnExit`, `OnPause` and `OnResume` schedules, the `in_state` and `state_in_stack` run conditions, and `StateScoped` entities that despawn when their state exits.
+- `cg_world`: RON prefabs. Components register by name (`register_component` for serde types, `register_prefab_component` for `PrefabComponent`s that resolve names at spawn time); prefabs nest children, report unknown components and bad fields with line and column, and round-trip to RON. `Prefabs` parses on first use; `commands.spawn_prefab(name)` spawns one.
+- `cg_world`: `WorldPlugin`, the `AppWorldExt` app methods and a prelude (with `ChildOf`, `Children` and `Name`).
+- `cg_core`: the `StateTransition` schedule between `PreUpdate` and the fixed steps; `Rect::overlaps`, `Rect::from_points` and serde for `Rect`.
+- `cg_render`: the `Sprite`, `Layer`, `Visibility` (with computed `InheritedVisibility`) and `Camera2D` components. The renderer picks the active camera, culls sprite entities outside its view and queues the rest each frame (`RenderSystems::Queue`, then `Draw`).
+- `cg_render`: `CameraView` (a camera's settings plus where it is) with world/screen conversion, and the `MainCamera` system parameter for game code.
+- `cg_render`: texture names (`Textures::add_named`, `named`, `name_of`), which prefabs use; `Sprite::solid`; `RenderStats::culled`; serde for `Color` (hex strings or channels), `ScalingMode` and `Camera2D`.
+- `cg_platform`: `Window::with_size` for tests and tools.
+- `examples/ecs_sprites`: prefabs with nested children, a spinning hierarchy, interpolated movement, blinking visibility, despawning, culling, and a Menu / Playing / Paused state stack with a pause overlay parented to the camera. `--demo` runs every transition without input.
+- `examples/bunnymark`: `--ecs` makes every bunny an entity.
+- CI: `bunnymark --ecs` and `ecs_sprites --demo` runs.
+
+### Changed
+
+- `Camera2D` is a component on an entity; its transform places the view. The `Camera2D` resource is gone.
+- `Sprite` is the ECS component and no longer has `position`, `rotation`, `scale` or `layer`. Immediate-mode drawing takes a transform: `sprites.draw(sprite, transform)` or `sprites.draw_on(layer, sprite, transform)`, queuing `QueuedSprite`s. Sprite transforms are full affine matrices, so skew from scaled parents is drawn correctly.
+- `OffscreenRenderer::render` takes a `CameraView` and a `Sprites` queue.
+- `DefaultPlugins` adds `WorldPlugin`, and the prelude includes `cg_world`'s.
+- New dependency: `erased-serde` 0.4.11 (prefab components are read through it). `ron` is now a normal dependency of `cg_world`.
+
 ## Phase 2 — Renderer core
 
 ### Added

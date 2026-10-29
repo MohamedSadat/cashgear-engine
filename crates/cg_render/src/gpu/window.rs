@@ -2,7 +2,7 @@
 
 use super::painter::{FrameInput, FrameStats, Painter};
 use super::{RenderError, describe, request_device};
-use crate::{Camera2D, DebugShapes, RenderPlugin, RenderStats, Sprites, Textures};
+use crate::{DebugShapes, FrameView, RenderPlugin, RenderStats, Sprites, Textures};
 use bevy_ecs::prelude::*;
 use cg_core::glam::UVec2;
 use cg_core::{AppExit, Time};
@@ -271,7 +271,7 @@ pub(crate) fn render(
     window: Res<Window>,
     handle: Option<Res<WindowHandle>>,
     mut lifecycle: MessageReader<Lifecycle>,
-    camera: Res<Camera2D>,
+    view: Res<FrameView>,
     textures: Res<Textures>,
     mut sprites: ResMut<Sprites>,
     mut shapes: ResMut<DebugShapes>,
@@ -291,7 +291,7 @@ pub(crate) fn render(
     let drawn = match handle {
         Some(handle) if !renderer.suspended => {
             let input = FrameInput {
-                camera: &camera,
+                view: &view.0,
                 textures: &textures,
                 sprites: sprites.queued(),
                 shapes: &shapes,

@@ -6,16 +6,25 @@
 //! ```no_run
 //! use cashgear_engine::prelude::*;
 //!
+//! fn setup(mut commands: Commands) {
+//!     commands.spawn(Camera2D::default());
+//!     commands.spawn((
+//!         Sprite::solid(Color::hex(0xffbe0b), vec2(32.0, 32.0)),
+//!         Transform2D::from_xy(0.0, 0.0),
+//!     ));
+//! }
+//!
+//! fn spin(mut sprites: Query<&mut Transform2D, With<Sprite>>, time: Res<Time>) {
+//!     for mut transform in &mut sprites {
+//!         transform.rotate(time.delta_secs());
+//!     }
+//! }
+//!
 //! fn main() {
 //!     App::new()
 //!         .add_plugins(DefaultPlugins::default())
-//!         .add_systems(Update, |mut sprites: ResMut<Sprites>| {
-//!             sprites.draw(Sprite {
-//!                 size: Some(vec2(32.0, 32.0)),
-//!                 color: Color::hex(0xffbe0b),
-//!                 ..default()
-//!             });
-//!         })
+//!         .add_systems(Startup, setup)
+//!         .add_systems(Update, spin)
 //!         .run();
 //! }
 //! ```
@@ -37,12 +46,14 @@ use cg_core::{App, FrameLimitPlugin, Plugin};
 use cg_platform::input::InputPlugin;
 use cg_platform::{Args, LogPlugin, WindowConfig, WindowPlugin};
 use cg_render::RenderPlugin;
+use cg_world::WorldPlugin;
 
 /// The engine version, taken from the crate manifest.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The standard set of plugins for a game: logging, the `--frames N` flag, input, the
-/// window with its runner, and the renderer.
+/// world (transforms, interpolation, prefabs), the window with its runner, and the
+/// renderer.
 ///
 /// Launch flags work on desktop and, as a query string (`?frames=60&backend=gl`), on the
 /// web: `--frames N` exits after N frames, `--no-vsync` and `--backend <list>` configure
@@ -79,6 +90,7 @@ impl Plugin for DefaultPlugins {
                 frames: args.parse("frames"),
             })
             .add_plugins(InputPlugin::default())
+            .add_plugins(WorldPlugin)
             .add_plugins(WindowPlugin {
                 window: self.window.clone(),
             })
@@ -87,12 +99,13 @@ impl Plugin for DefaultPlugins {
 }
 
 /// Common imports for game code: the app and plugins, schedules, time, the ECS, `glam`
-/// vectors, logging macros, the window, input and rendering.
+/// vectors, logging macros, the window, input, transforms, states, prefabs and rendering.
 pub mod prelude {
     pub use crate::DefaultPlugins;
     pub use cg_core::prelude::*;
     pub use cg_platform::prelude::*;
     pub use cg_render::prelude::*;
+    pub use cg_world::prelude::*;
 }
 
 #[cfg(test)]

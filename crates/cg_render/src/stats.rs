@@ -28,6 +28,7 @@ pub struct RenderStats {
     pub(crate) sprites: u32,
     pub(crate) batches: u32,
     pub(crate) shapes: u32,
+    pub(crate) culled: u32,
     pub(crate) adapter: String,
     pub(crate) backend: String,
     frame_time: Duration,
@@ -55,6 +56,11 @@ impl RenderStats {
     /// Debug shapes drawn last frame.
     pub fn shapes(&self) -> u32 {
         self.shapes
+    }
+
+    /// Sprite entities skipped last frame because they were outside the camera's view.
+    pub fn culled(&self) -> u32 {
+        self.culled
     }
 
     /// The average time between frames, refreshed twice a second. Zero until then.

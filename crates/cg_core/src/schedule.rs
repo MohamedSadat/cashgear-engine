@@ -5,12 +5,14 @@
 //! 1. [`Startup`], on the first frame only.
 //! 2. [`First`]: engine bookkeeping (message buffers).
 //! 3. [`PreUpdate`]: input is turned into action state.
-//! 4. Zero or more fixed steps, each running [`FixedPreUpdate`], [`FixedUpdate`] and
+//! 4. [`StateTransition`]: requested game-state changes are applied.
+//! 5. Zero or more fixed steps, each running [`FixedPreUpdate`], [`FixedUpdate`] and
 //!    [`FixedPostUpdate`]. Gameplay belongs in [`FixedUpdate`].
-//! 5. [`Update`]: per-frame logic that does not need a fixed rate.
-//! 6. [`PostUpdate`]: engine work that reacts to this frame's changes.
-//! 7. [`Render`]: the renderer draws the frame.
-//! 8. [`Last`]: end-of-frame cleanup, such as clearing just-pressed input.
+//! 6. [`Update`]: per-frame logic that does not need a fixed rate.
+//! 7. [`PostUpdate`]: engine work that reacts to this frame's changes, such as transform
+//!    propagation.
+//! 8. [`Render`]: the renderer draws the frame.
+//! 9. [`Last`]: end-of-frame cleanup, such as clearing just-pressed input.
 
 use bevy_ecs::schedule::ScheduleLabel;
 
@@ -25,6 +27,11 @@ pub struct First;
 /// Runs before the fixed steps. The input plugin updates action state here.
 #[derive(ScheduleLabel, Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PreUpdate;
+
+/// Runs after [`PreUpdate`], before the fixed steps. Game-state changes (`cg_world`'s
+/// state stack) are applied here, so a frame's gameplay sees the new state.
+#[derive(ScheduleLabel, Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StateTransition;
 
 /// Runs before [`FixedUpdate`] in every fixed step.
 #[derive(ScheduleLabel, Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]

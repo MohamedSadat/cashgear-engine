@@ -3,7 +3,9 @@
 
 use crate::batch::{Batcher, SpriteInstance};
 use crate::debug::{ShapeVertex, tessellate};
-use crate::{Camera2D, Color, DebugShapes, Filter, ScalingMode, Sprite, TextureId, Textures};
+use crate::{
+    CameraView, Color, DebugShapes, Filter, QueuedSprite, ScalingMode, TextureId, Textures,
+};
 use bytemuck::{Pod, Zeroable};
 use cg_core::glam::{Mat4, UVec2, Vec2};
 use std::collections::HashMap;
@@ -13,9 +15,9 @@ const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
 /// Everything a frame draws.
 pub(crate) struct FrameInput<'a> {
-    pub(crate) camera: &'a Camera2D,
+    pub(crate) view: &'a CameraView,
     pub(crate) textures: &'a Textures,
-    pub(crate) sprites: &'a [Sprite],
+    pub(crate) sprites: &'a [QueuedSprite],
     pub(crate) shapes: &'a DebugShapes,
     /// Physical pixels per logical pixel.
     pub(crate) scale_factor: f32,
@@ -366,13 +368,13 @@ impl Painter {
         target_size: UVec2,
         input: &FrameInput<'_>,
     ) -> FrameStats {
-        let camera = input.camera;
-        let viewport = camera.viewport(target_size, input.scale_factor);
+        let camera = &input.view.camera;
+        let viewport = input.view.viewport(target_size, input.scale_factor);
         let rect = viewport.rect;
         let has_view = !rect.is_empty();
         let pixel_perfect = matches!(camera.scaling, ScalingMode::PixelPerfect(_));
         let letterbox = matches!(camera.scaling, ScalingMode::Letterbox(_));
-        let view_proj = camera.view_projection(viewport.world_size);
+        let view_proj = input.view.view_projection(viewport.world_size);
 
         // Build this frame's geometry.
         self.batcher.build(input.sprites, input.textures);

@@ -1,6 +1,7 @@
 //! The [`Rect`] type.
 
 use glam::Vec2;
+use serde::{Deserialize, Serialize};
 
 /// An axis-aligned rectangle, stored as its minimum and maximum corners.
 ///
@@ -14,7 +15,9 @@ use glam::Vec2;
 /// assert_eq!(rect.min, vec2(-2.0, -1.0));
 /// assert!(rect.contains(vec2(1.0, 0.5)));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+///
+/// In RON: `(min: (2, 0), max: (6, 2))`.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct Rect {
     /// The corner with the smallest coordinates.
     pub min: Vec2,
@@ -82,6 +85,19 @@ impl Rect {
     pub fn contains(&self, point: Vec2) -> bool {
         point.cmpge(self.min).all() && point.cmple(self.max).all()
     }
+
+    /// Whether the two rectangles share any area or edge.
+    pub fn overlaps(&self, other: &Rect) -> bool {
+        self.min.cmple(other.max).all() && other.min.cmple(self.max).all()
+    }
+
+    /// The smallest rectangle containing all of `points`, or `None` if there are none.
+    pub fn from_points(points: impl IntoIterator<Item = Vec2>) -> Option<Self> {
+        let mut points = points.into_iter();
+        let first = points.next()?;
+        let (min, max) = points.fold((first, first), |(min, max), p| (min.min(p), max.max(p)));
+        Some(Self { min, max })
+    }
 }
 
 #[cfg(test)]
@@ -99,6 +115,19 @@ mod tests {
         assert_eq!(a.center(), vec2(3.0, 3.0));
         assert!(!a.is_empty());
         assert!(Rect::default().is_empty());
+    }
+
+    #[test]
+    fn overlaps_and_bounds() {
+        let a = Rect::new(0.0, 0.0, 2.0, 2.0);
+        assert!(a.overlaps(&Rect::new(1.0, 1.0, 3.0, 3.0)));
+        assert!(a.overlaps(&Rect::new(2.0, 0.0, 3.0, 1.0)));
+        assert!(!a.overlaps(&Rect::new(2.5, 0.0, 3.0, 1.0)));
+        assert_eq!(
+            Rect::from_points([vec2(1.0, 5.0), vec2(-1.0, 2.0), vec2(0.0, 7.0)]),
+            Some(Rect::new(-1.0, 2.0, 1.0, 7.0))
+        );
+        assert_eq!(Rect::from_points([]), None);
     }
 
     #[test]

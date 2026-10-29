@@ -1,0 +1,20 @@
+// The player: a brown bunny in a hat. It moves in fixed steps, so it is `Interpolated`;
+// the hat is a child and is drawn smoothly with it.
+(
+    components: {
+        "Name": "player",
+        "Sprite": (texture: "bunny_brown", pivot: (0.5, 0)),
+        "Layer": (3),
+        "Interpolated": (),
+        "Velocity": ((0, 0)),
+        "Player": (speed: 180, jump: 420),
+    },
+    children: [
+        (components: {
+            "Name": "player hat",
+            "Transform2D": (translation: (1, 22)),
+            "Sprite": (texture: "hat", pivot: (0.5, 0), color: "#3a3f4b"),
+            "Layer": (4),
+        }),
+    ],
+)

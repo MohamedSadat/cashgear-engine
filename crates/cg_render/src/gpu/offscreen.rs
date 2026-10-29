@@ -2,7 +2,7 @@
 
 use super::painter::{FrameInput, Painter, extent};
 use super::{RenderError, describe, request_device};
-use crate::{Camera2D, DebugShapes, Image, Sprite, Textures};
+use crate::{CameraView, DebugShapes, Image, Sprites, Textures};
 use cg_core::glam::UVec2;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -17,13 +17,14 @@ const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 ///
 /// ```no_run
 /// use cg_core::prelude::*;
-/// use cg_render::{Camera2D, DebugShapes, OffscreenRenderer, Sprite, TextureId, Textures};
+/// use cg_render::{CameraView, Color, DebugShapes, OffscreenRenderer, Sprite, Sprites, Textures};
 ///
 /// let mut renderer = pollster::block_on(OffscreenRenderer::new())?;
-/// let sprites = [Sprite { size: Some(vec2(8.0, 8.0)), ..Sprite::new(TextureId::WHITE) }];
+/// let mut sprites = Sprites::default();
+/// sprites.draw(Sprite::solid(Color::RED, vec2(8.0, 8.0)), Affine2::IDENTITY);
 /// let image = renderer.render(
 ///     uvec2(64, 36),
-///     &Camera2D::default(),
+///     &CameraView::default(),
 ///     &Textures::default(),
 ///     &sprites,
 ///     &DebugShapes::default(),
@@ -72,9 +73,9 @@ impl OffscreenRenderer {
     pub fn render(
         &mut self,
         size: UVec2,
-        camera: &Camera2D,
+        view: &CameraView,
         textures: &Textures,
-        sprites: &[Sprite],
+        sprites: &Sprites,
         shapes: &DebugShapes,
     ) -> Result<Image, RenderError> {
         let size = size.max(UVec2::ONE);
@@ -88,18 +89,18 @@ impl OffscreenRenderer {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let target = texture.create_view(&wgpu::TextureViewDescriptor::default());
         self.painter
             .sync_textures(&self.device, &self.queue, textures);
         let input = FrameInput {
-            camera,
+            view,
             textures,
-            sprites,
+            sprites: sprites.queued(),
             shapes,
             scale_factor: 1.0,
         };
         self.painter
-            .render(&self.device, &self.queue, &view, size, &input);
+            .render(&self.device, &self.queue, &target, size, &input);
         self.read_back(&texture, size)
     }
 

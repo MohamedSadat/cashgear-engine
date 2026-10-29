@@ -10,8 +10,9 @@ publish.workspace = true
 
 [dependencies]
 bevy_ecs.workspace = true
-glam.workspace = true
+glam = { workspace = true, features = ["serde"] }
 log.workspace = true
+serde.workspace = true
 
 [lints]
 workspace = true

@@ -3,6 +3,7 @@
 use crate::{Color, Image};
 use bevy_ecs::resource::Resource;
 use cg_core::glam::UVec2;
+use std::collections::HashMap;
 
 /// Identifies a texture in [`Textures`]. Ids are never reused, so a removed texture's id
 /// draws nothing rather than some other texture.
@@ -51,9 +52,13 @@ pub(crate) struct Entry {
 /// assert_eq!(textures.size(id).unwrap().x, 16);
 /// // let bunny = textures.add(Image::from_png(include_bytes!("bunny.png"))?);
 /// ```
+///
+/// Textures can also have names, which is how prefabs refer to them until Phase 4 gives
+/// them asset paths. [`TextureId::WHITE`] is called `"white"`.
 #[derive(Resource)]
 pub struct Textures {
     entries: Vec<Option<Entry>>,
+    names: HashMap<String, TextureId>,
     next_version: u64,
 }
 
@@ -61,9 +66,10 @@ impl Default for Textures {
     fn default() -> Self {
         let mut textures = Self {
             entries: Vec::new(),
+            names: HashMap::new(),
             next_version: 0,
         };
-        textures.add(Image::filled(1, 1, Color::WHITE));
+        textures.add_named("white", Image::filled(1, 1, Color::WHITE));
         textures
     }
 }
@@ -84,6 +90,30 @@ impl Textures {
             version,
         }));
         id
+    }
+
+    /// Adds an image with [`Filter::Nearest`] sampling under a name. A texture that had the
+    /// name before keeps its id but loses the name.
+    pub fn add_named(&mut self, name: impl Into<String>, image: Image) -> TextureId {
+        let id = self.add(image);
+        self.names.insert(name.into(), id);
+        id
+    }
+
+    /// The texture with this name.
+    pub fn named(&self, name: &str) -> Option<TextureId> {
+        self.names
+            .get(name)
+            .copied()
+            .filter(|&id| self.entry(id).is_some())
+    }
+
+    /// A name of this texture, if it has one.
+    pub fn name_of(&self, id: TextureId) -> Option<&str> {
+        self.names
+            .iter()
+            .find(|(_, named)| **named == id)
+            .map(|(name, _)| name.as_str())
     }
 
     /// Replaces a texture's image. Returns `false` if the id is unknown or removed.
@@ -120,6 +150,7 @@ impl Textures {
             return None;
         }
         let entry = self.entries.get_mut(id.0 as usize)?.take()?;
+        self.names.retain(|_, named| *named != id);
         self.bump();
         Some(entry.image)
     }
@@ -186,6 +217,17 @@ mod tests {
         assert_eq!(textures.size(TextureId::WHITE), Some(UVec2::ONE));
         assert_eq!(textures.remove(TextureId::WHITE), None);
         assert_eq!(textures.len(), 1);
+    }
+
+    #[test]
+    fn names_find_textures_until_removed() {
+        let mut textures = Textures::default();
+        assert_eq!(textures.named("white"), Some(TextureId::WHITE));
+        let bunny = textures.add_named("bunny", Image::filled(2, 2, Color::RED));
+        assert_eq!(textures.named("bunny"), Some(bunny));
+        assert_eq!(textures.name_of(bunny), Some("bunny"));
+        textures.remove(bunny);
+        assert_eq!(textures.named("bunny"), None);
     }
 
     #[test]

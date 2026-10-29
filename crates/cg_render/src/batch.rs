@@ -1,8 +1,7 @@
 //! Turning queued sprites into sorted GPU instances and per-texture batches.
 
-use crate::{Sprite, TextureId, Textures};
+use crate::{QueuedSprite, TextureId, Textures};
 use bytemuck::{Pod, Zeroable};
-use cg_core::Rect;
 use cg_core::glam::Vec2;
 use core::ops::Range;
 
@@ -42,15 +41,15 @@ impl Batcher {
     /// Sorts `sprites` by layer then texture (keeping queue order otherwise), builds their
     /// instances and groups them into batches. Sprites with a missing texture or no area
     /// are skipped.
-    pub(crate) fn build(&mut self, sprites: &[Sprite], textures: &Textures) {
+    pub(crate) fn build(&mut self, sprites: &[QueuedSprite], textures: &Textures) {
         self.order.clear();
         self.instances.clear();
         self.batches.clear();
 
         self.order.extend(0..sprites.len() as u32);
         let key = |&i: &u32| {
-            let sprite = &sprites[i as usize];
-            (sprite.layer, sprite.texture)
+            let queued = &sprites[i as usize];
+            (queued.layer, queued.sprite.texture)
         };
         // Queues are usually built in order already; skip the sort then.
         if !self.order.is_sorted_by_key(key) {
@@ -58,16 +57,17 @@ impl Batcher {
         }
 
         for &i in &self.order {
-            let sprite = &sprites[i as usize];
-            let Some(instance) = instance(sprite, textures) else {
+            let queued = &sprites[i as usize];
+            let Some(instance) = instance(queued, textures) else {
                 continue;
             };
+            let texture = queued.sprite.texture;
             let index = self.instances.len() as u32;
             self.instances.push(instance);
             match self.batches.last_mut() {
-                Some(batch) if batch.texture == sprite.texture => batch.instances.end = index + 1,
+                Some(batch) if batch.texture == texture => batch.instances.end = index + 1,
                 _ => self.batches.push(Batch {
-                    texture: sprite.texture,
+                    texture,
                     instances: index..index + 1,
                 }),
             }
@@ -75,21 +75,20 @@ impl Batcher {
     }
 }
 
-/// The GPU instance for one sprite.
-fn instance(sprite: &Sprite, textures: &Textures) -> Option<SpriteInstance> {
+/// The GPU instance for one sprite: its local quad (pivot at the origin) mapped through
+/// its transform, which may rotate, scale, mirror or skew it.
+fn instance(queued: &QueuedSprite, textures: &Textures) -> Option<SpriteInstance> {
+    let sprite = &queued.sprite;
     let texture_size = textures.size(sprite.texture)?.as_vec2();
-    let source = sprite
-        .source
-        .unwrap_or_else(|| Rect::from_min_size(Vec2::ZERO, texture_size));
-    let size = sprite.size.unwrap_or_else(|| source.size().abs()) * sprite.scale;
-    if size.x == 0.0 || size.y == 0.0 {
+    let (source, size) = sprite.source_and_size(textures)?;
+    let transform = queued.transform;
+    if size.x == 0.0 || size.y == 0.0 || transform.matrix2.determinant() == 0.0 {
         return None;
     }
 
-    let rotation = Vec2::from_angle(sprite.rotation);
-    let x_axis = rotation.rotate(Vec2::new(size.x, 0.0));
-    let y_axis = rotation.rotate(Vec2::new(0.0, size.y));
-    let translation = sprite.position - x_axis * sprite.pivot.x - y_axis * sprite.pivot.y;
+    let x_axis = transform.matrix2 * Vec2::new(size.x, 0.0);
+    let y_axis = transform.matrix2 * Vec2::new(0.0, size.y);
+    let translation = transform.transform_point2(-sprite.pivot * size);
 
     // Texel rows run top to bottom, so the sprite's bottom edge samples `source.max.y`.
     let (mut left, mut right) = (source.min.x, source.max.x);
@@ -118,8 +117,25 @@ fn instance(sprite: &Sprite, textures: &Textures) -> Option<SpriteInstance> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Color, Image};
+    use crate::{Color, Image, Sprite};
+    use cg_core::Rect;
     use cg_core::glam::vec2;
+    use cg_world::Transform2D;
+
+    fn at(sprite: Sprite, transform: Transform2D) -> QueuedSprite {
+        QueuedSprite {
+            sprite,
+            transform: transform.affine(),
+            layer: 0,
+        }
+    }
+
+    fn on(layer: i32, sprite: Sprite) -> QueuedSprite {
+        QueuedSprite {
+            layer,
+            ..at(sprite, Transform2D::IDENTITY)
+        }
+    }
 
     fn textures() -> (Textures, TextureId, TextureId) {
         let mut textures = Textures::default();
@@ -132,17 +148,11 @@ mod tests {
     fn sorts_by_layer_then_texture_and_batches_runs() {
         let (textures, a, b) = textures();
         let sprites = [
-            Sprite {
-                layer: 1,
-                ..Sprite::new(a)
-            },
-            Sprite::new(b),
-            Sprite::new(a),
-            Sprite::new(b),
-            Sprite {
-                layer: -1,
-                ..Sprite::new(b)
-            },
+            on(1, Sprite::new(a)),
+            on(0, Sprite::new(b)),
+            on(0, Sprite::new(a)),
+            on(0, Sprite::new(b)),
+            on(-1, Sprite::new(b)),
         ];
         let mut batcher = Batcher::default();
         batcher.build(&sprites, &textures);
@@ -174,12 +184,9 @@ mod tests {
         let (mut textures, a, b) = textures();
         textures.remove(b);
         let sprites = [
-            Sprite::new(b),
-            Sprite {
-                scale: Vec2::ZERO,
-                ..Sprite::new(a)
-            },
-            Sprite::new(a),
+            on(0, Sprite::new(b)),
+            at(Sprite::new(a), Transform2D::from_scale(Vec2::ZERO)),
+            on(0, Sprite::new(a)),
         ];
         let mut batcher = Batcher::default();
         batcher.build(&sprites, &textures);
@@ -191,27 +198,42 @@ mod tests {
     fn instance_geometry_follows_pivot_size_and_rotation() {
         let (textures, a, _) = textures();
         let sprite = Sprite {
-            position: vec2(10.0, 20.0),
             pivot: vec2(0.5, 0.0),
             ..Sprite::new(a)
         };
-        let instance = instance(&sprite, &textures).unwrap();
+        let placed = Transform2D::from_xy(10.0, 20.0);
+        let instance = instance_of(&at(sprite, placed), &textures);
         // The texture is 8×4 texels, so the sprite is 8×4 world units.
         assert_eq!(instance.x_axis, [8.0, 0.0]);
         assert_eq!(instance.y_axis, [0.0, 4.0]);
         assert_eq!(instance.translation, [6.0, 20.0]);
 
-        let turned = Sprite {
-            rotation: core::f32::consts::FRAC_PI_2,
-            ..sprite
-        };
-        let instance = instance_of(&turned, &textures);
+        let turned = placed.with_rotation(core::f32::consts::FRAC_PI_2);
+        let instance = instance_of(&at(sprite, turned), &textures);
         assert!(Vec2::from_array(instance.x_axis).distance(vec2(0.0, 8.0)) < 1e-5);
         assert!(Vec2::from_array(instance.y_axis).distance(vec2(-4.0, 0.0)) < 1e-5);
     }
 
-    fn instance_of(sprite: &Sprite, textures: &Textures) -> SpriteInstance {
-        instance(sprite, textures).unwrap()
+    #[test]
+    fn instance_keeps_skew_from_the_transform() {
+        let (textures, a, _) = textures();
+        // A parent stretched along x holding a turned child: a skewed matrix.
+        let parent = Transform2D::from_scale(vec2(2.0, 1.0)).affine();
+        let child = Transform2D::from_rotation(core::f32::consts::FRAC_PI_4).affine();
+        let queued = QueuedSprite {
+            sprite: Sprite::new(a),
+            transform: parent * child,
+            layer: 0,
+        };
+        let instance = instance_of(&queued, &textures);
+        let x_axis = (parent * child).matrix2 * vec2(8.0, 0.0);
+        let y_axis = (parent * child).matrix2 * vec2(0.0, 4.0);
+        assert!(Vec2::from_array(instance.x_axis).distance(x_axis) < 1e-5);
+        assert!(Vec2::from_array(instance.y_axis).distance(y_axis) < 1e-5);
+    }
+
+    fn instance_of(queued: &QueuedSprite, textures: &Textures) -> SpriteInstance {
+        instance(queued, textures).unwrap()
     }
 
     #[test]
@@ -221,7 +243,7 @@ mod tests {
             source: Some(Rect::new(2.0, 0.0, 6.0, 2.0)),
             ..Sprite::new(a)
         };
-        let instance = instance_of(&sprite, &textures);
+        let instance = instance_of(&on(0, sprite), &textures);
         assert_eq!(instance.uv, [0.25, 0.5, 0.75, 0.0]);
         assert_eq!(instance.x_axis, [4.0, 0.0]);
 
@@ -230,6 +252,9 @@ mod tests {
             flip_y: true,
             ..sprite
         };
-        assert_eq!(instance_of(&flipped, &textures).uv, [0.75, 0.0, 0.25, 0.5]);
+        assert_eq!(
+            instance_of(&on(0, flipped), &textures).uv,
+            [0.75, 0.0, 0.25, 0.5]
+        );
     }
 }

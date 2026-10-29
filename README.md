@@ -2,7 +2,7 @@
 
 CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WASM) and Android, built with `winit`, `wgpu` and `bevy_ecs`. A sample platformer (`games/platformer`) proves it. The engine is built in 15 phases; see [docs/PLAN.md](docs/PLAN.md) for the plan and [docs/PROGRESS.md](docs/PROGRESS.md) for where it stands.
 
-> **Status:** Phase 2. `cg_core` (app, plugins, fixed-timestep loop, `Time`), `cg_platform` (window, input, actions, lifecycle, logging) and `cg_render` (`wgpu` sprites, camera, virtual resolutions, debug shapes) work on desktop and web. ECS components and scenes arrive in Phase 3.
+> **Status:** Phase 3. `cg_core` (app, plugins, fixed-timestep loop, `Time`, schedules), `cg_platform` (window, input, actions, lifecycle, logging), `cg_render` (`wgpu` sprites, camera, virtual resolutions, debug shapes, culling) and `cg_world` (transforms and hierarchy, interpolation, a game-state stack, RON prefabs) work on desktop and web. Assets and Tiled maps arrive in Phase 4.
 
 ## Workspace layout
 
@@ -32,16 +32,19 @@ Each example is its own binary crate under `examples/`, with an `index.html` for
 | Example | Shows |
 | --- | --- |
 | `hello_window` | The window, the game loop, input logging and an interpolated player box |
-| `bunnymark` | Thousands of bouncing sprites, scaling modes, camera controls and debug shapes |
+| `bunnymark` | Thousands of bouncing sprites, scaling modes, camera controls and debug shapes; `--ecs` makes each bunny an entity |
+| `ecs_sprites` | Prefabs, a transform hierarchy, interpolation, visibility, culling and a Menu / Playing / Paused state stack |
 
 ```sh
 cargo run -p hello_window                  # desktop
 cargo run -p hello_window -- --frames 120  # run 120 frames, then exit (every example)
 cargo run -p bunnymark --release -- --bunnies 50000 --no-vsync
+cargo run -p ecs_sprites                   # add -- --demo to cycle the states by itself
 
 cargo install trunk --locked               # once
 cd examples/hello_window && trunk serve    # web: open http://127.0.0.1:8080
 cd examples/bunnymark && trunk serve --port 8081   # flags go in the URL: ?bunnies=20000&backend=gl
+cd examples/ecs_sprites && trunk serve --port 8082
 ```
 
 Every example takes `--frames N`, `--no-vsync` and `--backend <vulkan|dx12|metal|gl|webgpu>`; on the web they go in the page URL as `?frames=N&no-vsync&backend=gl`.

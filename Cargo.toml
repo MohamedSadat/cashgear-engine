@@ -32,6 +32,7 @@ bytemuck = { version = "1.25.2", features = ["derive"] }
 console_error_panic_hook = "0.1.7"
 console_log = "1.1.0"
 env_logger = "0.11.11"
+erased-serde = "0.4.11"
 gilrs = "0.11.2"
 glam = "0.34.1"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
@@ -50,6 +51,11 @@ winit = "0.30.13"
 missing_docs = "warn"
 
 # Dependencies (wgpu, glam, bevy_ecs, image...) are optimised even in dev builds, so debug
-# examples run near release speed while the engine's own crates stay quick to rebuild.
+# examples run near release speed. The workspace's own crates get light optimisation:
+# bevy's generic query code is compiled into them, and at opt-level 0 a 10,000-entity
+# scene runs about ten times slower.
+[profile.dev]
+opt-level = 1
+
 [profile.dev.package."*"]
 opt-level = 2
