@@ -17,8 +17,8 @@ This file tracks phase status, the decisions made at the start of each phase, kn
 | 8 | Text and UI | Done | `phase-8` |
 | 9 | Platformer sample game | Done | `phase-9` |
 | 10 | Web build | Done | `phase-10` |
-| 11 | Android build | In progress (device test left) | |
-| 12 | Lua scripting | Not started | |
+| 11 | Android build | Done | `phase-11` |
+| 12 | Lua scripting | Next | |
 | 13 | Scene editor | Not started | |
 | 14 | Polish, performance and release | Not started | |
 
@@ -746,7 +746,8 @@ Other choices made during the phase:
   | Release AAB | 41.4 MB | the same libraries, and their symbol metadata for Play |
 
   The libraries' load segments are aligned to 16 KB. A release build from clean takes about 20 minutes here (three ABIs with LTO).
-- Not checked yet: anything on a device. The phone was not connected during the phase, and the emulator needs the hypervisor driver, which needs an administrator. The phone test (install, play, home and back, the back button, saves after a restart, the safe area, the frame rate, the sound) is the step left before the `phase-11` tag.
+- CI's `android` job builds the debug APK (43,670,174 bytes) and the unsigned release AAB (40,774,491 bytes) and uploads them as `platformer-android`, and the Pages deploy follows. Its first run failed in the release build's lint step; see Gradle above.
+- Not checked by me: anything on a device. The phone was not connected during the phase, and the emulator needs the hypervisor driver, which needs an administrator. The phase was tagged before the phone test, at the user's choice; the device checks are in the manual checks below.
 
 ### Manual checks for the user
 
@@ -831,6 +832,7 @@ Other choices made during the phase:
 - The rotate notice and the page's loading and error texts are in English (the notice also in Arabic); the page does not know the game's language.
 - On desktop, the platformer pauses whenever its window loses focus during a level, even for a moment.
 
+- The Android build has not run on a device yet (phone or emulator). The first run may need fixes in the activity, the JNI reads, the surface handling or the audio.
 - Android has no gamepads yet: winit's Android backend and gilrs do not read them. Touch controls only.
 - The game runs once per process: the activity ends the process when Android destroys it (the game quit from the title, the task swiped away), so nothing in memory survives that; the platformer keeps its saves in `Storage`. A launch while the game runs (`singleTask`) brings it forward, and a new intent's `args` extra is ignored.
 - Only display cutouts are kept clear; rounded screen corners can clip the corners of the HUD a little.
