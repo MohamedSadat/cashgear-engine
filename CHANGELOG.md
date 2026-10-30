@@ -3,6 +3,36 @@
 All notable changes to CashGear Engine are recorded here, one section per phase.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Phase 13 — Scene editor
+
+### Added
+
+- `tools/cg_editor`: the scene editor, a library (`EditorPlugin`) and a binary. It draws the scene with the engine's renderer and puts egui panels around it: a menu bar and toolbar, a hierarchy, a palette, an inspector, an asset browser with thumbnails and a console. The view fits between the panels.
+- Editing Tiled maps: the editor edits the object layers of a `.tmx`. Place a map tileset's classed tiles, prefabs (as point, rectangle or ellipse objects of that class) and shapes. Select by click, Shift+click or a box. Move, rotate and resize with gizmos, with grid snapping (the map's tile size or a chosen step; Ctrl toggles it while held) and 15° rotation steps. Nudge with the arrows; duplicate and delete. Drag objects between layers in the hierarchy. The inspector edits name, class, layer, position, size, rotation, visibility, tile flips and typed custom properties, including class properties. It overrides a tile's properties and sets components through properties named after them, field by field. A "Spawned as" section lists the components the engine gave the object.
+- Saving a map writes only the object layers that changed, and inside them only the changed objects. The rest of the file is copied byte for byte, so Tiled still opens it and a diff shows just the edit; an unchanged map saves identically, and tests check that on all four platformer maps. Saving splices into the file as it is on disk, so tiles saved in Tiled meanwhile are kept.
+- Tiled stays the tilemap editor. When the open map is saved in Tiled, the editor follows: it reloads the objects if there are no edits here, and asks (reload or keep mine) if there are. The edits are written into the map asset as they happen, so the view, the spawned prefabs and Play see them before they are saved.
+- Editing prefabs (`.prefab.ron`): a component tree whose nodes can be dragged between parents, children added, duplicated and deleted. Each component is edited field by field: numbers, vectors, strings, colours, lists, options, and enums with their variants. A "RON" toggle edits a component as text. The file's header comments are kept when saving, and the result is checked by reading it back before it is written. The prefab is shown live as a preview, particles and all.
+- Component editing through serde, not reflection: `cg_editor::value::Value` captures any `Serialize` value with its exact shape and writes it back as RON, which the component's own `Deserialize` reads. Every registered prefab component can be edited with no new derives. An enum's variants are found by asking its `Deserialize`.
+- Undo and redo for every change: drags and typing are one step each, selections are restored too, and the Edit menu names the step.
+- Play-in-editor: Play (F5) hands the camera back to the game, lets fixed steps run and sends `PlayStarted`. Stop sends `PlayStopped`, waits for the game to leave its level, despawns every entity made since Play and shows the edited scene again; the document is never touched by Play. In `PlayMode::Game` the game starts its level from the edited map. In `PlayMode::Scene`, the standalone editor, the scene itself runs with physics, animation and Lua scripts. The standalone editor loads every prefab file of the asset folder, named after the file in PascalCase.
+- While editing, fixed steps are paused, so nothing falls or runs scripts, but effects in `Update` (particles) keep moving.
+- The editor asks before discarding unsaved changes (opening another document or closing the window). Errors in game code while playing are logged to the console instead of closing the editor.
+- `--demo`: a scripted session that moves an object, undoes and redoes, places a tile, edits a property, saves into a scratch folder and reads it back, plays for two seconds and stops, checking each step. CI runs it for the platformer and for the standalone editor on the scripting example.
+- `games/platformer/editor` (`platformer_editor`): the platformer with the editor built in. It opens level 1 (or the map given) and Play runs the level being edited. Plays keep saves in memory.
+- `cg_world`: `EditMode`, `PlayStarted`, `PlayStopped` and the `in_editor` and `editing` run conditions, so a game supports play-in-editor without any `cfg`. `Prefab::components` and `Prefabs::names`.
+- `cg_core`: `Time::set_fixed_paused` and `fixed_paused`, which pause the fixed steps alone.
+- `cg_platform`: `Window::set_view_insets` (edges kept for a tool's panels, counted in `safe_area`); `Window::set_close_guard` with `Lifecycle::CloseRequested`; `LogCapture` and `LogLine`, the log kept in memory for an in-app console.
+- `cg_render`: `OffscreenRenderer::render_frame` with `OffscreenFrame`: an offscreen frame with overlays (egui) included, for screenshots of tools.
+- `cg_tiled`: `TiledMap::tile_for_gid` and `TiledMap::gid`.
+- `cg_ui`: `DebugOverlay::windows` (tools with their own egui panels turn the overlay's windows off) and `Inspector::describe`.
+- `platformer`: `Game`, `Options` (with `Options::from_args`) and `engine_plugins` are public; an `Editor` screen; `Game` reacts to the editor's Play and Stop.
+
+### Changed
+
+- The platformer's `run` is built from `engine_plugins` and `Game`, as the editor builds it.
+- The overlay's Scripts window follows `DebugOverlay::windows`.
+- `cargo check-wasm`, `clippy-wasm`, `check-android` and `clippy-android` leave out `platformer_editor` as well.
+
 ## Phase 12 — Lua scripting
 
 ### Added

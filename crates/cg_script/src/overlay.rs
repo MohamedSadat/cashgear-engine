@@ -39,6 +39,7 @@ fn open_on_error(
 
 fn scripts_window(
     egui: Option<Res<EguiContext>>,
+    overlay: Option<Res<DebugOverlay>>,
     scripting: Res<Scripting>,
     status: Res<ScriptStatus>,
     mut errors: ResMut<ScriptErrors>,
@@ -46,6 +47,10 @@ fn scripts_window(
     let Some(ctx) = egui.as_ref().and_then(|egui| egui.get()) else {
         return;
     };
+    // A tool with its own panels (the editor) turns the overlay's windows off.
+    if overlay.is_some_and(|overlay| !overlay.windows) {
+        return;
+    }
     let failing = !errors.is_empty()
         || status
             .scripts

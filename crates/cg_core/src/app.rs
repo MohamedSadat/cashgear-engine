@@ -221,7 +221,7 @@ impl App {
 }
 
 fn signal_message_update_while_paused(time: Res<Time>, mut registry: ResMut<MessageRegistry>) {
-    if time.time_scale() == 0.0 {
+    if time.time_scale() == 0.0 || time.fixed_paused() {
         registry.should_update = ShouldUpdateMessages::Ready;
     }
 }

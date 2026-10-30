@@ -262,6 +262,15 @@ impl Prefab {
         self.components.iter().map(|(name, _)| name.as_str())
     }
 
+    /// The prefab's own components with their data, in file order. The data serializes
+    /// as the prefab file holds it, so tools can show or convert it: the editor's
+    /// inspector turns it into fields.
+    pub fn components(&self) -> impl Iterator<Item = (&str, &dyn erased_serde::Serialize)> {
+        self.components
+            .iter()
+            .map(|(name, data)| (name.as_str(), data.as_serialize()))
+    }
+
     /// The child prefabs, in file order.
     pub fn children(&self) -> &[Prefab] {
         &self.children
@@ -502,6 +511,13 @@ impl Prefabs {
         self.entries.contains_key(name)
     }
 
+    /// The prefabs' names, sorted.
+    pub fn names(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = self.entries.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        names
+    }
+
     /// The prefab called `name`, parsing it first if needed.
     pub fn get(
         &mut self,
@@ -713,6 +729,11 @@ mod tests {
             ["Transform2D", "Velocity", "Health", "Enemy", "Tint"]
         );
         assert_eq!(again.children().len(), 2);
+        let tint = again
+            .components()
+            .find(|(name, _)| *name == "Tint")
+            .map(|(_, data)| ron::to_string(data).unwrap());
+        assert_eq!(tint.as_deref(), Some("\"green\""));
     }
 
     #[test]

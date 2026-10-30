@@ -669,6 +669,10 @@ name = "cg_editor"
 version = "0.1.0"
 dependencies = [
  "cashgear_engine",
+ "log",
+ "pollster",
+ "ron",
+ "serde",
 ]
 
 [[package]]
@@ -2895,6 +2899,16 @@ version = "0.1.0"
 dependencies = [
  "cashgear_engine",
  "platformer",
+]
+
+[[package]]
+name = "platformer_editor"
+version = "0.1.0"
+dependencies = [
+ "cashgear_engine",
+ "cg_editor",
+ "platformer",
+ "pollster",
 ]
 
 [[package]]

@@ -82,7 +82,7 @@ pub use camera::{
 pub use color::Color;
 pub use debug::DebugShapes;
 pub use gpu::RenderError;
-pub use gpu::offscreen::OffscreenRenderer;
+pub use gpu::offscreen::{OffscreenFrame, OffscreenRenderer};
 pub use image::{Filter, Image, ImageError, ImageLoader};
 pub use overlay::{OverlayFrame, RenderOverlay, RenderOverlays};
 pub use queue::{FrameView, RenderSystems};

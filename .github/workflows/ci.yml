@@ -78,6 +78,12 @@ jobs:
           # A level that is all Lua, bot included, with the overlay's Scripts window; it
           # exits with an error if a script fails or the bot misses the goal.
           run cargo run -p scripting -- --demo --overlay
+          # The scene editor with the platformer built in: it moves an object, undoes and
+          # redoes, places a tile, edits a property, saves into a scratch folder, plays
+          # level 1 and stops, checking each step; it exits with an error if one fails.
+          run cargo run -p platformer_editor -- --demo
+          # The editor on its own, playing the scripting example's level with its prefabs.
+          run cargo run -p cg_editor -- --asset-root examples/scripting/assets maps/playground.tmx --demo
       - name: committed atlases are up to date
         run: >-
           cargo run -p cg_pack -- atlas examples/tiled_map/art/characters

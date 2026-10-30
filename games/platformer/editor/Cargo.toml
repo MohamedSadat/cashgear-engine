@@ -1,0 +1,20 @@
+[package]
+name = "platformer_editor"
+description = "The platformer with the scene editor built in: Play runs the level being edited."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cashgear_engine = { workspace = true, features = ["debug-overlay", "script"] }
+cg_editor.workspace = true
+platformer = { path = ".." }
+
+[dev-dependencies]
+pollster.workspace = true
+
+[lints]
+workspace = true

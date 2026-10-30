@@ -659,6 +659,11 @@ mod tests {
         let centre = view.world_to_screen(Vec2::ZERO, &window);
         assert_eq!(centre, vec2(1260.0, 540.0));
         assert!(view.screen_to_world(centre, &window).length() < 1e-3);
+
+        // A tool's panels count as covered too; at each edge the larger inset wins.
+        let mut window = window;
+        window.set_view_insets([60, 40, 300, 0]);
+        assert_eq!(window.safe_area(), Rect::new(120.0, 40.0, 2100.0, 1080.0));
     }
 
     #[test]

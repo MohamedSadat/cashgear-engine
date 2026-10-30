@@ -212,6 +212,13 @@ fn maps_load_with_tilesets_layers_and_objects() {
     assert_eq!(objects[1].properties.int("value"), Some(5));
     assert_eq!(objects[1].tile.map(|t| t.id), Some(3));
     assert_eq!(objects[2].shape, ObjectShape::Point);
+
+    // Global tile ids, as the file stores them, both ways.
+    assert_eq!(map.tile_for_gid(4), objects[1].tile);
+    assert_eq!(map.gid(flipped), 2_147_483_650);
+    assert_eq!(map.tile_for_gid(2_147_483_650), Some(flipped));
+    assert_eq!(map.tile_for_gid(0), None);
+    assert_eq!(map.tile_for_gid(5), None, "the tileset has four tiles");
 }
 
 #[test]

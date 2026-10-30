@@ -38,7 +38,7 @@ pub mod tasks;
 mod window;
 
 pub use crate::args::Args;
-pub use crate::log::LogPlugin;
+pub use crate::log::{LogCapture, LogLine, LogPlugin};
 pub use crate::target::Target;
 pub use window::{Lifecycle, LifecycleChanged, Window, WindowConfig, WindowHandle, WindowPlugin};
 

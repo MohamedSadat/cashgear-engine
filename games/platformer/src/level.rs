@@ -140,6 +140,31 @@ fn skip_to_level(
     }
 }
 
+/// The scene editor's Play and Stop: play the level whose map is being edited (the map
+/// asset holds the edits), and go back to the idle `Editor` screen.
+pub(crate) fn play_in_editor(
+    mut started: MessageReader<PlayStarted>,
+    mut stopped: MessageReader<PlayStopped>,
+    mut session: ResMut<Session>,
+    mut next: ResMut<NextState<Screen>>,
+    mut time: ResMut<Time>,
+) {
+    if let Some(play) = started.read().last() {
+        let map = play.map.as_deref().unwrap_or_default();
+        match LEVELS.iter().position(|level| level.map == map) {
+            Some(level) => {
+                session.level = level;
+                next.set(Screen::Playing);
+            }
+            None => warn!("only the levels can be played; {map} is not one of them"),
+        }
+    }
+    if stopped.read().last().is_some() {
+        time.set_time_scale(1.0);
+        next.set(Screen::Editor);
+    }
+}
+
 fn title_music(art: Res<Art>, mut audio: ResMut<Audio>) {
     audio.play_music(
         &art.title_music,

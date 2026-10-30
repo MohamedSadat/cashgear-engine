@@ -19,8 +19,8 @@ This file tracks phase status, the decisions made at the start of each phase, kn
 | 10 | Web build | Done | `phase-10` |
 | 11 | Android build | Done | `phase-11` |
 | 12 | Lua scripting | Done | `phase-12` |
-| 13 | Scene editor | Next | |
-| 14 | Polish, performance and release | Not started | |
+| 13 | Scene editor | Done | `phase-13` |
+| 14 | Polish, performance and release | Next | |
 
 ## Phase 0 — Repository and workspace
 
@@ -824,6 +824,84 @@ Other choices made during the phase:
 - `cargo run -p platformer -- --no-scripts` plays with the Rust walkers and checkpoints; it should feel the same.
 - On a phone: build and install as in Phase 11 (`games/platformer/android`); the walkers and checkpoints there are the Lua ones. `adb logcat -s cashgear` shows `scripts/checkpoint.lua: checkpoint at ...` when a flag is raised.
 
+## Phase 13 — Scene editor
+
+### Decisions
+
+| Question | Answer |
+| --- | --- |
+| Where a level's entities are saved | In the Tiled map, in place. The editor edits a `.tmx`'s object layers and writes them back. Only the changed object layers are rewritten, and inside them only the changed objects; the rest of the file is copied byte for byte, so Tiled still opens it. The platformer needed no migration. RON is the prefab format, and the editor opens and saves `.prefab.ron` files too. |
+| How the inspector edits components | Through serde, not `bevy_reflect`. A component's data is captured as a `Value` tree with its exact serde shape (struct, field and variant names), edited field by field, and written back as RON that the component's own `Deserialize` reads. The `PrefabRegistry` is the only registration: every prefab component can be edited, with no new derives and no new dependency. |
+| Which desktops | All three from the same code. Tested on Windows here; CI builds and tests it on Ubuntu (and runs both demos under Xvfb); macOS is untested. |
+| Scope of v1 | Entities and prefabs: placing, tuning, prefab trees, undo, play-in-editor. Particle emitters and tweens are tuned live through the inspector, since `Update` keeps running while editing. There are no dedicated animation or particle editors. |
+
+Chosen without asking (said with the questions):
+
+- **The editor is a library a game builds in.** Play runs game code, so a game adds `EditorPlugin` after the engine's plugins and before its own, and reacts to `PlayStarted` and `PlayStopped`. The platformer's editor is `games/platformer/editor` (`cargo run -p platformer_editor`). The `cg_editor` binary runs alone for any asset folder; there Play runs only the engine's systems (physics, animation, Lua).
+
+Other choices made during the phase:
+
+- **Edit mode.** `EditMode` (in `cg_world`, so games need no `cfg`) is present while an editor runs the app. While editing, `Time::set_fixed_paused(true)` stops the fixed steps alone: no physics, gameplay, scripts or fixed-step animation, but `Update` runs on scaled time, so particles and tile animations move. The platformer starts on a new idle `Editor` screen instead of the title when it sees `EditMode` while it builds.
+- **The document and the world.** The open map's object layers are the document (`tmx::MapObjects`, read from the file's text). Each edit is written into the `TiledMap` asset, and the editor's own `Tilemap` entity respawns the objects as the engine always does: prefabs by class, components from properties. The view, the "Spawned as" list and Play therefore show unsaved edits exactly as the game will. Objects are selected by id, since their entities are respawned. A prefab document is spawned as a preview and respawned after each change.
+- **The file round trip.** A small XML reader in `cg_editor::tmx` keeps where each element is in the text. Saving compares each object with the file's version: unchanged objects are copied as they are and changed ones are written in Tiled's attribute order and style. That style is one line per child as Tiled writes, or all on one line if the file does that, as the platformer's generated maps do. Unknown attributes, child elements and property kinds (lists) are kept verbatim; the map's `nextobjectid` follows new objects. The editor saves into the file as it is on disk at that moment, so tiles saved in Tiled since are kept.
+- **Tiled saving the open map.** The editor notices the asset changing without its doing (hot reload) and reads the file. If only the tiles changed, or it is the editor's own save coming back, the objects stay. If the objects changed and the editor has none of its own, it takes the file's objects as one undoable step. If both changed, it asks: reload, or keep my changes.
+- **Coordinates.** The inspector shows Tiled's own numbers (pixels, y down, clockwise degrees) because that is what the file and Tiled show. The viewport works in world units. Rotating turns an object about its centre and recomputes Tiled's anchor; resizing keeps the opposite side.
+- **The value tree.** `Value` is serde's data model with names kept as `&'static str`. Floats with no fraction are written as integers (`12`), as hand-written prefabs have them. An enum's variants are found by writing a variant that cannot exist and reading the list from ron's "expected one of" error. Switching to a variant tries it without data, then with the old variant's data, and otherwise asks for RON. Every edit must read back through the component's `Deserialize` before it is kept.
+- **Undo.** A step is the document as it was before the change, plus the selection. A gesture (one drag, or typing in one field until it loses focus) is one step. The history keeps 500 steps.
+- **Play and Stop.** Play records the world's entities (resources excluded: in bevy 0.20 they are entities too), gives the camera back as the game had it, resumes fixed steps and sends `PlayStarted`. In the game mode the editor's own tilemap is despawned and the game spawns its level from the edited asset. Stop sends `PlayStopped` and gives the game two frames to leave its level. At the start of the next frame, before any system has queued commands, it despawns every entity made since Play, then respawns the editor's scene. While the editor runs, bevy's fallback error handler only warns, so a mistake in game code during Play is logged in the console instead of closing the editor with unsaved work.
+- **The viewport** is the window's `safe_area` less the panels: the editor sets `Window::set_view_insets` from egui's free space each frame, so the camera, the game's UI and pointer conversions all fit inside it. While editing, the camera uses `ScalingMode::WindowSize` at the editor's zoom, without `CameraFollow`. Play gives the game's own settings back, so a pixel-perfect game shows pixel-perfect inside the viewport.
+- **Overlays** are drawn with egui's painter on the background layer, clipped to the viewport: the grid (dark and faint, to show over a pale sky), outlines coloured by class, labels for objects without a picture, the selection and the gizmos. The cg_ui debug overlay supplies egui; the editor turns its own windows off (`DebugOverlay::windows`) and its F12 key. egui 0.37's bundled fonts lack symbols such as arrows and crosses, so the editor's buttons use words.
+- **Closing.** `Window::set_close_guard` makes the runner send `Lifecycle::CloseRequested` instead of exiting, and the editor asks about unsaved changes first.
+- **The console** shows what the engine logs, through `LogCapture`: the desktop logger (now wrapping env_logger), the web console and logcat keep records in memory when asked.
+- **Standalone prefabs.** `EditorPlugin::load_prefabs` loads every `.prefab.ron` in the asset folder that the game has not loaded, named after the file in PascalCase. The examples name theirs that way.
+- **Versions.** No new external dependencies; `cg_editor` uses `ron` and `serde` from the workspace and egui through `cg_ui`.
+
+### Done
+
+- `tools/cg_editor`: `EditorPlugin` (with `PlayMode`, `open`, `save_dir`, `demo`, `load_prefabs` and `with_args`) and `Editor`, plus the modules `doc` (`Document`, `MapDoc`, `PrefabDoc`, `PrefabNode`, `Selected`, `History`, `Placed`), `scene` (the engine's view of an object, applying the document to the map asset, the prefab preview), `tmx` (`MapObjects`, `ObjectLayer`, `ObjectData`, `Shape`, `Property`, `PropertyData`, `read_map`, `write_map`) and `value` (`Value`, `parse_component`, `component_prefab`, `variants`). Behind them: the viewport, panels, inspector, play and demo. The `cg_editor` binary loads the asset folder's prefabs, and its Play runs the scene.
+- `games/platformer/editor`: the `platformer_editor` binary, its demo test and the ignored `capture_editor` test.
+- `cg_world`: `EditMode`, `PlayStarted`, `PlayStopped`, `in_editor`, `editing`, `Prefab::components`, `Prefabs::names`. `cg_core`: `Time::set_fixed_paused`, `fixed_paused`. `cg_platform`: `Window::view_insets`, `set_view_insets`, `close_guard`, `set_close_guard`, `Lifecycle::CloseRequested`, `LogCapture`, `LogLine`. `cg_render`: `OffscreenRenderer::render_frame`, `OffscreenFrame`. `cg_tiled`: `TiledMap::tile_for_gid`, `gid`. `cg_ui`: `DebugOverlay::windows`, `Inspector::describe`. `cg_script`: the Scripts window follows `DebugOverlay::windows`.
+- `games/platformer`: public `Game`, `Options` (`from_args`) and `engine_plugins`; the `Editor` screen; Play and Stop from the editor.
+- 473 tests (26 more than Phase 12), with the four screen captures still ignored:
+  - the value tree, writing RON and finding enum variants;
+  - the TMX reader and writer: byte-identical round trips, including all four platformer maps; only changed objects rewritten; new, deleted and moved objects; single-line files staying single-line; broken files;
+  - prefab nodes reparenting and writing;
+  - in the editor without a window: moving, undo and redo, saving in place, and the `tiled` crate reading the saved file; placing, duplicating and deleting; Play letting a body fall and Stop putting it back with the same entities; editing, reparenting and saving a prefab; a map saved elsewhere reloading or asking; closing with unsaved changes;
+  - the viewport driven through the engine's pointer input: picking, a snapped drag that undoes in one step, box selection, resizing by a handle, wheel zoom at the pointer, and the rotate gizmo turning an object about its centre;
+  - the platformer editor's whole demo without a window;
+  - the fixed-step pause and the view insets.
+- CI: `platformer_editor --demo`, and `cg_editor --demo` on the scripting example's level.
+
+### Verified
+
+- All tests pass; fmt, clippy (desktop, wasm and Android) and rustdoc with warnings denied are clean.
+- Desktop (Windows, GTX 1650, Vulkan), windowed:
+  - `platformer_editor --demo`: level 1 opens; a coin moves one grid step and is drawn there; undo and redo work; a spring is placed; a walker's speed goes to 25. The save into a scratch folder reads back with everything before the object layer unchanged. Level 1 plays with the game's own code: player, HUD, music, 124 fixed steps. Stop returns to the same scene with the same number of entities. Exit success in 155 frames.
+  - `cg_editor --asset-root examples/scripting/assets maps/playground.tmx --demo`: the example's six prefabs load by file name. Play runs physics and the Lua scripts; `scripts/player.lua` logs an error there because it calls `game.demo`, a function only the example game provides. Exit success.
+- Offscreen captures of the editor, egui included (`cargo test -p platformer_editor -- --ignored capture_editor`), looked at:
+  - level 1 at 2× with the grid, the hierarchy naming tile objects by their tile's class, and the asset browser;
+  - a walker selected, with the move gizmo and its `speed` and `range` in the inspector;
+  - the palette of the tileset's classed tiles, with their pictures;
+  - Play: the level running pixel-perfect inside the viewport with the game's HUD;
+  - the checkpoint sparks prefab, its particle settings edited field by field (the `shape` enum as a list of variants) and the sparks moving in the preview.
+- Not checked by me:
+  - Using the editor by hand in its window: mouse drags, typing in fields, drag-and-drop in the hierarchy, the unsaved-changes dialog. The tests drive the same code through the engine's input, but not through the operating system's mouse.
+  - A map saved by the editor and then opened in the Tiled application (the `tiled` crate reads it in a test). Saving in Tiled while the editor is open was tested by writing the file from a test.
+  - Linux and macOS windows (CI runs the demos under Xvfb on Ubuntu).
+
+### Manual checks for the user
+
+- `cargo run -p platformer_editor`. Level 1 opens at 2×; F frames the whole level.
+  - Click a coin and drag it: it snaps to the 18-pixel grid; hold Ctrl to place it freely. Ctrl+Z puts it back, Ctrl+Y again. E then drag the ring to rotate, R then drag a corner to resize, arrows to nudge.
+  - Click a blue walker: the inspector shows its `speed` and `range`; change `speed` to 60.
+  - Place tab: pick the spring tile and click in the level; Shift keeps placing, Escape stops. Pick a rectangle with the class `Platform` and give it `dx`, `dy` and `speed` properties (the property row adds them).
+  - Play (F5): the level runs inside the view with your edits (the faster walker, the spring). Play a little, then Stop (F5): everything is back where you left it. Ctrl+S saves `games/platformer/assets/maps/level1.tmx`; `git diff` should show only the objects you changed. Revert with `git checkout games/platformer/assets/maps/level1.tmx` if you only tried it out.
+- Open `level1.tmx` in Tiled while the editor shows it, move some tiles and save: the editor shows them at once and keeps its own object edits.
+- Assets panel: open `prefabs/` and double-click `checkpoint_sparks.prefab.ron`. Change `burst` or the colours and watch the preview; "RON" shows a component as text.
+- Close the window with unsaved changes: it asks first.
+- `cargo run -p cg_editor -- --asset-root examples/scripting/assets maps/playground.tmx`, then Play: the crates fall and the blocks patrol.
+- On Linux or macOS, if you have one: the same commands.
+
 ## Known issues
 
 - On the web, `AppExit` stops the loop but leaves the page; there is nowhere to exit to.
@@ -918,6 +996,20 @@ Other choices made during the phase:
 - `audio.play` loads a sound on first use if the game did not; a one-shot that has to wait more than half a second for it is skipped, as for Rust code. Preload sounds a script plays.
 - Scripts reach a Tiled object's properties, not other objects by their id; `world.find(name)` finds an entity by its `Name`.
 
+- The editor edits object layers only; tile layers, tilesets and layers themselves (adding, removing, renaming) are Tiled's. Objects cannot be parents of other objects (Tiled has no such thing); prefabs have children.
+- Polygons and polylines can be moved and rotated in the editor but not reshaped point by point; text objects keep their text as Tiled wrote it.
+- Objects made from Tiled templates are edited as overrides: their tile and shape come from the template unless the object sets its own, and the template file itself is not edited.
+- Every edit rewrites the map asset, so the tilemap's chunks and collision are rebuilt and its objects respawned on each frame of a drag. Fine for the platformer's levels (about 1,000 tiles and 60 objects); a much larger map would want edits applied to the spawned entities directly.
+- Respawning objects restarts their particles and animations while they are edited.
+- Play keeps the editor's panels; the game's view fits between them. In the game mode the game is told which map is open (`PlayStarted::map`); the platformer plays its three levels, not the title backdrop.
+- Stop despawns every entity made since Play. A game that spawns something once, lazily, during play and expects it to stay would lose it; it should spawn it at start-up or check for it. Resources changed during play are not restored (the game sets them up again on the next Play).
+- While the editor runs, bevy's fallback error handler warns instead of panicking, for the game's code too.
+- The inspector shows the enum variants it can find by asking the component's `Deserialize`; switching to a variant whose data cannot be guessed asks for RON. An `Option` that is `None` is set through RON.
+- Saving a prefab writes every field of each component (the editor cannot tell defaults from values), and only the comment lines at the top of the file are kept.
+- The editor has no clipboard (egui gets no copy or paste events from the engine), no native file dialogs (documents open from the asset browser or the command line), and no preferences saved between runs.
+- The standalone editor's prefab names come from file names in PascalCase; a game that names its prefabs otherwise (`ecs_sprites` uses lowercase names) needs its own editor build, as the platformer has.
+- egui's bundled fonts lack many symbols (arrows, crosses), so the editor's buttons use words.
+
 ## Notes for later phases
 
 - **Any phase:** `trunk` only watches the example folder, so touch the example after editing engine crates while `trunk serve` runs.
@@ -968,6 +1060,8 @@ Other choices made during the phase:
 - **Phase 13:** the editor can list a scene's scripts and edit a `Script` component as its asset path; the Scripts window is an egui window the editor can show. Play-in-editor runs scripts like the game; `self` tables are not saved, so stopping play and playing again starts every script fresh. A `Script` in a prefab is a path string, so prefabs the editor writes keep it.
 - **Phase 14:** profile the script run (a puffin scope around it and its hooks) and make engine calls cheaper (cache the lent world, reuse result tables); `require` for shared script files; Lua bindings for UI text, buttons and the locale; script docs in the mdBook guide (the hooks, the API, the sandbox, hot reload, the web strategy); the `cargo generate` template can include `scripts/` and the `--no-scripts` pattern.
 
+- **Phase 14:** puffin scopes for the editor's frame (the panels, and the map rewrite on each drag) if a larger level makes it slow. The mdBook guide needs an editor chapter: the keys, saving in place, play-in-editor, and building the editor into a game with `EditorPlugin` and `EditMode`. The `cargo generate` template can include an `editor` crate like `games/platformer/editor`. The editor's `--demo` and `capture_editor` are its regression checks.
+
 ## Backlog
 
 Features that came up but don't serve the platformer or a listed example go here.
@@ -998,3 +1092,4 @@ Features that came up but don't serve the platformer or a listed example go here
 - Web: uploading to itch.io from CI with butler (needs an API key secret), a service worker for offline play, content-hashed bundle names, the page following the game's language, and cpal's AudioWorklet output (needs cross-origin isolation headers, which GitHub Pages cannot set).
 - Scripting: `require` of other script files, Lua bindings for UI and the locale, a per-frame hook, coroutines that wait across steps (`wait(seconds)`), Luau as an alternative runtime, and scripts on the web through a Lua compiled for `wasm32-unknown-unknown` if one appears.
 - Android: gamepads, a soft keyboard for text fields, GameActivity, Android TV and ChromeOS, keeping clear of rounded screen corners, and Play Asset Delivery if the bundle grows.
+- Editor: an animation preview (a sheet's clips, an animator's states), a particle preset editor, painting tiles, adding and renaming object layers, reshaping polygons, a clipboard, several open documents in tabs, recent files and saved preferences, native file dialogs, and editing a live entity during Play.

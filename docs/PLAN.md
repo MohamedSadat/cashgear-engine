@@ -33,6 +33,7 @@ CashGear Engine is a Rust 2D game engine for desktop, web and Android, proven by
 | Debug UI | `egui` + `egui-wgpu` + `egui-winit` | Overlay and later the editor |
 | Data files | `serde` + `ron` | Prefabs, scenes, settings |
 | Scripting | `mlua` (Lua 5.4, sources compiled in) | Chosen in phase 12: desktop and Android; web builds stay Rust-only |
+| Scene editor | own `cg_editor` (egui panels, serde-driven inspector) | Chosen in phase 13: edits Tiled object layers in place and RON prefabs; a library games build in for play-in-editor |
 | Profiling | `puffin` (+ Tracy optional) |  |
 | Web tooling | `trunk`, `wasm-bindgen`, `wasm-opt` |  |
 | Android tooling | `cargo-ndk` + Gradle (Android Gradle plugin) | Chosen in phase 11: `cargo-apk` is deprecated and `xbuild` unmaintained |
@@ -96,7 +97,7 @@ The engine is one Cargo workspace of small crates behind a single facade crate, 
 | `cashgear_engine` | Facade crate, `prelude`, `DefaultPlugins` | 1 |
 | `examples/` | One runnable example per feature | every phase |
 | `games/platformer` | Sample game proving the engine | 9 |
-| `tools/cg_editor` | Desktop scene editor (binary) | 13 |
+| `tools/cg_editor` | Desktop scene editor (a library games build in, and a binary) | 13 |
 | `tools/cg_pack` | CLI: atlas packing, asset bundling | 4 |
 | `docs/` | `PLAN.md`, `PROGRESS.md`, mdBook guide | 0 |
 
@@ -322,9 +323,9 @@ These phases add tools for faster content work and finish the engine as a reusab
 
 - `tools/cg_editor` binary: engine renderer in the viewport, egui panels around it.
 - Viewport: pan, zoom, grid, snapping, selection, move/rotate/scale gizmos.
-- Panels: scene hierarchy, inspector (component editing via `bevy_reflect`), asset browser with thumbnails, console.
+- Panels: scene hierarchy, inspector (component editing through serde, chosen in phase 13 over `bevy_reflect`), asset browser with thumbnails, console.
 - Place prefabs, edit properties, parent/child drag-and-drop.
-- Undo/redo command stack; save/load scenes as RON.
+- Undo/redo command stack; save/load scenes (phase 13: Tiled object layers saved in place, prefabs as RON).
 - Play-in-editor: run the scene, stop, and restore the edited state.
 - Tiled stays the tilemap editor; the editor shows maps and reloads them on change.
 

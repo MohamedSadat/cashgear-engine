@@ -2,7 +2,7 @@
 
 CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WASM) and Android, built with `winit`, `wgpu` and `bevy_ecs`. A sample platformer (`games/platformer`) proves it. The engine is built in 15 phases; see [docs/PLAN.md](docs/PLAN.md) for the plan and [docs/PROGRESS.md](docs/PROGRESS.md) for where it stands.
 
-> **Status:** Phase 12. `cg_core` (app, plugins, fixed-timestep loop, `Time`, schedules), `cg_platform` (window, fullscreen, input, actions, lifecycle, logging, asset IO and bundles, save storage), `cg_render` (`wgpu` sprites with hit flashes, camera, virtual resolutions, debug shapes, culling, image and atlas assets), `cg_world` (transforms and hierarchy, interpolation, a game-state stack, RON prefabs), `cg_assets` (handles, background loading, loading states, hot reload), `cg_tiled` (Tiled maps with parallax, chunked tiles, tile animations and object prefabs), `cg_physics` (kinematic bodies with slopes, one-way platforms and moving platforms, tile and entity colliders, sensors, layers, raycasts) and `cg_anim` (Aseprite sprite sheets, animation state machines and events, tweens, CPU particles, camera follow, shake and fades) `cg_audio` (OGG and WAV sounds, streamed music with crossfades, buses with saved volume settings, positional sound) and `cg_ui` (shaped text in TTF, OTF and bitmap fonts with Arabic and right-to-left layouts, nodes with anchors, rows and columns, buttons, sliders and progress bars, keyboard, gamepad, mouse and touch navigation, on-screen touch controls, localization, and an egui debug overlay) work on desktop, web and Android, and `cg_script` runs gameplay written in Lua 5.4, reloaded while the game runs, on desktop and Android. The platformer sample game (`games/platformer`) plays through three levels everywhere; its walkers and checkpoints are Lua scripts where Lua runs and Rust on the web. CI publishes the platformer's web release to <https://mohamedsadat.github.io/cashgear-engine/>.
+> **Status:** Phase 13. `cg_core` (app, plugins, fixed-timestep loop, `Time`, schedules), `cg_platform` (window, fullscreen, input, actions, lifecycle, logging, asset IO and bundles, save storage), `cg_render` (`wgpu` sprites with hit flashes, camera, virtual resolutions, debug shapes, culling, image and atlas assets), `cg_world` (transforms and hierarchy, interpolation, a game-state stack, RON prefabs), `cg_assets` (handles, background loading, loading states, hot reload), `cg_tiled` (Tiled maps with parallax, chunked tiles, tile animations and object prefabs), `cg_physics` (kinematic bodies with slopes, one-way platforms and moving platforms, tile and entity colliders, sensors, layers, raycasts) and `cg_anim` (Aseprite sprite sheets, animation state machines and events, tweens, CPU particles, camera follow, shake and fades) `cg_audio` (OGG and WAV sounds, streamed music with crossfades, buses with saved volume settings, positional sound) and `cg_ui` (shaped text in TTF, OTF and bitmap fonts with Arabic and right-to-left layouts, nodes with anchors, rows and columns, buttons, sliders and progress bars, keyboard, gamepad, mouse and touch navigation, on-screen touch controls, localization, and an egui debug overlay) work on desktop, web and Android, and `cg_script` runs gameplay written in Lua 5.4, reloaded while the game runs, on desktop and Android. `tools/cg_editor`, a desktop scene editor, places and tunes a level's entities in Tiled maps and prefabs, with undo and play-in-editor. The platformer sample game (`games/platformer`) plays through three levels everywhere; its walkers and checkpoints are Lua scripts where Lua runs and Rust on the web. CI publishes the platformer's web release to <https://mohamedsadat.github.io/cashgear-engine/>.
 
 ## Workspace layout
 
@@ -22,7 +22,8 @@ CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WAS
 | `crates/cg_script` | Lua runtime and bindings (facade feature `script`) | 12 |
 | `games/platformer` | Sample game | 9 |
 | `tools/cg_pack` | CLI: atlas packing, asset bundling | 4, 10 |
-| `tools/cg_editor` | Desktop scene editor | 13 |
+| `tools/cg_editor` | Desktop scene editor (a library games build in, and a binary) | 13 |
+| `games/platformer/editor` | The platformer with the editor built in | 13 |
 | `examples/` | One runnable example per feature | from 1 |
 
 ## The sample game
@@ -47,6 +48,19 @@ trunk build --release --no-default-features --public-url ./
 That uses the small `web-release` profile and wasm-opt, leaves out the debug overlay, and packs `assets/` into one `assets.cgpak` (`cg_pack trunk-bundle`, a hook in `Trunk.toml`). `dist/` then holds the whole game: serve it from any static host, or zip it for itch.io (each CI run uploads that zip as the `platformer-web` artifact). The page shows a loading bar, errors with a Reload button, a "turn your phone sideways" notice on phones held upright, and has a web manifest for "Add to Home Screen".
 
 `cargo test -p platformer -- --ignored capture_screens` renders the bot's run to PNGs in `target/platformer-captures/`.
+
+## The scene editor
+
+`tools/cg_editor` edits the object layers of Tiled maps and RON prefabs, drawn by the engine with egui panels around the view: a hierarchy with drag-and-drop between layers (and between parents, in prefabs), a palette of the map's classed tiles, prefabs and shapes, an inspector that edits names, classes, custom properties and every registered component field by field, an asset browser with thumbnails, and a console. Move, rotate and resize with gizmos and grid snapping; every change can be undone. Saving writes the object layers back into the `.tmx` in place and leaves the rest as Tiled wrote it, so Tiled stays the tilemap editor: save the tiles there and the editor shows them at once. **Play** runs the scene and **Stop** brings the edited scene back as it was.
+
+```sh
+cargo run -p platformer_editor                       # level 1, with the game built in: Play runs it
+cargo run -p platformer_editor -- maps/level2.tmx    # another level, or a prefab (prefabs/dust.prefab.ron)
+cargo run -p platformer_editor -- --demo             # a scripted session that edits, saves (to a scratch folder), plays and stops (CI runs this)
+cargo run -p cg_editor -- --asset-root examples/scripting/assets maps/playground.tmx   # on its own: Play runs physics, animation and Lua
+```
+
+Keys: W, E and R pick the move, rotate and resize tools; middle or right drag (or Space and drag) pans, the wheel zooms; Shift adds to the selection; arrows nudge (Shift: by a pixel); Ctrl turns snapping off while held; Delete, Ctrl+D, Ctrl+Z, Ctrl+Y, Ctrl+S; F5 plays and stops; F frames the selection. A game builds the editor in by adding `cg_editor::EditorPlugin` before its own plugins and reacting to `PlayStarted` and `PlayStopped` (see `games/platformer/editor`). `cargo test -p platformer_editor -- --ignored capture_editor` renders the editor to PNGs in `target/editor-captures/`.
 
 ## Examples
 

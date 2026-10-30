@@ -2,12 +2,25 @@
 
 use super::painter::{FrameInput, Painter, extent};
 use super::{RenderError, describe, request_device};
-use crate::{CameraView, DebugShapes, Image, Sprites};
+use crate::{CameraView, DebugShapes, Image, RenderOverlays, Sprites};
 use cg_assets::Assets;
 use cg_core::glam::UVec2;
 use std::sync::{Arc, Mutex, PoisonError};
 
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+
+/// The target of [`OffscreenRenderer::render_frame`]: its size, its scale factor
+/// (physical pixels per logical pixel), and the part the view must keep to (a window's
+/// [`safe_area`](cg_platform::Window::safe_area)), the whole image if `None`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OffscreenFrame {
+    /// The image's size in pixels.
+    pub size: UVec2,
+    /// Physical pixels per logical pixel.
+    pub scale_factor: f32,
+    /// Where the view goes, in pixels from the top-left; the whole image if `None`.
+    pub area: Option<cg_core::Rect>,
+}
 
 /// Renders frames into an [`Image`] with no window, through the same code path as the
 /// window. The engine's reference-image tests use it; it also suits screenshots and tools.
@@ -80,7 +93,26 @@ impl OffscreenRenderer {
         sprites: &Sprites,
         shapes: &DebugShapes,
     ) -> Result<Image, RenderError> {
-        let size = size.max(UVec2::ONE);
+        let frame = OffscreenFrame {
+            size,
+            scale_factor: 1.0,
+            area: None,
+        };
+        self.render_frame(frame, view, images, sprites, shapes, None)
+    }
+
+    /// Draws one frame as a window would, overlays (such as egui) included, into an image
+    /// of `frame.size` pixels, and reads it back. For screenshots of tools.
+    pub fn render_frame(
+        &mut self,
+        frame: OffscreenFrame,
+        view: &CameraView,
+        images: &Assets<Image>,
+        sprites: &Sprites,
+        shapes: &DebugShapes,
+        overlays: Option<&mut RenderOverlays>,
+    ) -> Result<Image, RenderError> {
+        let size = frame.size.max(UVec2::ONE);
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("cg_render offscreen target"),
             size: extent(size),
@@ -100,12 +132,14 @@ impl OffscreenRenderer {
             sprites: sprites.queued(),
             screen_sprites: sprites.screen_queued(),
             shapes,
-            scale_factor: 1.0,
-            area: cg_core::Rect::from_min_size(cg_core::glam::Vec2::ZERO, size.as_vec2()),
+            scale_factor: frame.scale_factor,
+            area: frame.area.unwrap_or_else(|| {
+                cg_core::Rect::from_min_size(cg_core::glam::Vec2::ZERO, size.as_vec2())
+            }),
         };
 
         self.painter
-            .render(&self.device, &self.queue, &target, size, &input, None);
+            .render(&self.device, &self.queue, &target, size, &input, overlays);
         self.read_back(&texture, size)
     }
 

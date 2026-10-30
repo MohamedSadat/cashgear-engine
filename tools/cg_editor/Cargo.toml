@@ -1,6 +1,6 @@
 [package]
 name = "cg_editor"
-description = "CashGear Engine desktop scene editor."
+description = "CashGear Engine desktop scene editor: Tiled object layers and prefabs, with play-in-editor."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,8 +8,24 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+# The editor is a library a game builds in, so Play runs the game's own systems
+# (`games/platformer/editor`), and a binary that edits any asset folder on its own.
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "cg_editor"
+path = "src/main.rs"
+
 [dependencies]
-cashgear_engine.workspace = true
+# egui comes through the debug overlay; Lua so Play runs scripts in the standalone editor.
+cashgear_engine = { workspace = true, features = ["debug-overlay", "script"] }
+log.workspace = true
+ron.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+pollster.workspace = true
 
 [lints]
 workspace = true

@@ -10,6 +10,7 @@
 //! | [`State`], [`NextState`], [`OnEnter`] ... | A stack of game states with enter, exit, pause and resume schedules |
 //! | [`StateScoped`] | Entities that despawn when their state exits |
 //! | [`Prefab`], [`Prefabs`], [`PrefabRegistry`] | Entities described in RON, spawned with `commands.spawn_prefab` |
+//! | [`EditMode`], [`PlayStarted`], [`PlayStopped`] | What an editor running the game says: editing or playing |
 //!
 //! ```
 //! use cg_core::prelude::*;
@@ -43,11 +44,13 @@
 //!     .run();
 //! ```
 
+mod edit;
 mod interpolate;
 mod prefab;
 mod state;
 mod transform;
 
+pub use edit::{EditMode, PlayStarted, PlayStopped, editing, in_editor};
 pub use interpolate::{
     Interpolated, InterpolatedTransforms, apply_interpolation_resets, lerp_affine,
     snapshot_interpolated,
@@ -70,8 +73,9 @@ use serde::de::DeserializeOwned;
 
 /// Adds transforms, interpolation and prefabs: the [`PrefabRegistry`] and [`Prefabs`]
 /// resources, transform propagation in [`FixedPreUpdate`], [`FixedPostUpdate`] and
-/// [`PostUpdate`], and the [`Interpolated`] bookkeeping. Registers `Transform2D`, `Name` and `Interpolated` for
-/// prefabs.
+/// [`PostUpdate`], and the [`Interpolated`] bookkeeping. Registers `Transform2D`, `Name` and
+/// `Interpolated` for prefabs, and the editor's [`PlayStarted`] and [`PlayStopped`]
+/// messages.
 ///
 /// `DefaultPlugins` includes it; the renderer adds it if it is missing.
 #[derive(Debug, Clone, Copy, Default)]
@@ -82,6 +86,8 @@ impl Plugin for WorldPlugin {
         app.init_resource::<PrefabRegistry>()
             .init_resource::<Prefabs>()
             .init_resource::<TransformPropagation>()
+            .add_message::<PlayStarted>()
+            .add_message::<PlayStopped>()
             .register_component::<Transform2D>("Transform2D")
             .register_prefab_component::<Name>("Name")
             .register_prefab_component::<Interpolated>("Interpolated")
@@ -189,13 +195,14 @@ impl AppWorldExt for App {
     }
 }
 
-/// Common imports: the plugin, transforms, interpolation, states and prefabs, plus the
-/// `ChildOf`/`Children` hierarchy and `Name` from the ECS.
+/// Common imports: the plugin, transforms, interpolation, states, prefabs and what an editor
+/// running the game says, plus the `ChildOf`/`Children` hierarchy and `Name` from the ECS.
 pub mod prelude {
     pub use crate::{
-        AppWorldExt, GlobalTransform2D, Interpolated, NextState, OnEnter, OnExit, OnPause,
-        OnResume, Prefab, PrefabCommandsExt, PrefabComponent, Prefabs, State, StateScoped,
-        Transform2D, WorldPlugin, in_state, state_in_stack,
+        AppWorldExt, EditMode, GlobalTransform2D, Interpolated, NextState, OnEnter, OnExit,
+        OnPause, OnResume, PlayStarted, PlayStopped, Prefab, PrefabCommandsExt, PrefabComponent,
+        Prefabs, State, StateScoped, Transform2D, WorldPlugin, editing, in_editor, in_state,
+        state_in_stack,
     };
     pub use bevy_ecs::hierarchy::{ChildOf, Children};
     pub use bevy_ecs::name::Name;

@@ -41,6 +41,7 @@ pub struct Time {
     fixed_step_count: u64,
     fixed_steps_this_frame: u32,
     time_scale: f32,
+    fixed_paused: bool,
     alpha: f32,
     accumulator: Duration,
     max_fixed_steps: u32,
@@ -60,6 +61,7 @@ impl Default for Time {
             fixed_step_count: 0,
             fixed_steps_this_frame: 0,
             time_scale: 1.0,
+            fixed_paused: false,
             alpha: 0.0,
             accumulator: Duration::ZERO,
             max_fixed_steps: DEFAULT_MAX_FIXED_STEPS,
@@ -155,6 +157,23 @@ impl Time {
         };
     }
 
+    /// Whether fixed steps are paused (see [`set_fixed_paused`](Self::set_fixed_paused)).
+    pub fn fixed_paused(&self) -> bool {
+        self.fixed_paused
+    }
+
+    /// Pauses or resumes the fixed steps alone. While paused, no
+    /// [`FixedUpdate`](crate::FixedUpdate) step runs, so gameplay, physics and fixed-step
+    /// animation stand still, but frames go on with scaled time: effects in
+    /// [`Update`](crate::Update) such as particles keep moving. An editor pauses them while
+    /// a scene is being edited. Time spent paused is not caught up afterwards.
+    pub fn set_fixed_paused(&mut self, paused: bool) {
+        self.fixed_paused = paused;
+        if paused {
+            self.accumulator = Duration::ZERO;
+        }
+    }
+
     /// Sets the fixed-step rate in steps per second.
     ///
     /// # Panics
@@ -207,7 +226,9 @@ impl Time {
         self.elapsed += self.delta;
         self.frame_count += 1;
         self.fixed_steps_this_frame = 0;
-        self.accumulator += self.delta;
+        if !self.fixed_paused {
+            self.accumulator += self.delta;
+        }
     }
 
     /// Takes one fixed step from the accumulator. Returns `false` when the accumulator holds
@@ -338,6 +359,23 @@ mod tests {
         assert_eq!(time.time_scale(), 0.0);
         time.set_time_scale(f32::NAN);
         assert_eq!(time.time_scale(), 0.0);
+    }
+
+    #[test]
+    fn paused_fixed_steps_keep_frame_time_going() {
+        let mut time = Time::default();
+        // A step that halves exactly.
+        let step = Duration::from_millis(16);
+        time.set_fixed_delta(step);
+        assert_eq!(frame(&mut time, step / 2), 0);
+        time.set_fixed_paused(true);
+        assert_eq!(frame(&mut time, step * 3), 0);
+        assert_eq!(time.delta(), step * 3);
+        assert_eq!(time.fixed_step_count(), 0);
+        // Nothing is caught up, not even the half step from before the pause.
+        time.set_fixed_paused(false);
+        assert_eq!(frame(&mut time, step / 2), 0);
+        assert_eq!(frame(&mut time, step / 2), 1);
     }
 
     #[test]

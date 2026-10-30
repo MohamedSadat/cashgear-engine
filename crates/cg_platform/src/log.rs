@@ -2,6 +2,9 @@
 
 use cg_core::{App, Plugin};
 use log::LevelFilter;
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, PoisonError};
 
 /// Libraries whose routine messages are hidden below a level: `wgpu`'s low-level backend
 /// (harmless driver chatter), symphonia's OGG reader (a line each time a stream opens) and
@@ -41,6 +44,93 @@ impl Plugin for LogPlugin {
     }
 }
 
+/// One log record kept by [`LogCapture`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogLine {
+    /// The record's level.
+    pub level: log::Level,
+    /// Where it came from: usually the module path, such as `cg_tiled::spawn`.
+    pub target: String,
+    /// The message.
+    pub message: String,
+}
+
+static CAPTURING: AtomicBool = AtomicBool::new(false);
+static CAPTURED: Mutex<Captured> = Mutex::new(Captured {
+    lines: VecDeque::new(),
+    capacity: 0,
+});
+
+struct Captured {
+    lines: VecDeque<LogLine>,
+    capacity: usize,
+}
+
+/// Keeps the log records the engine's logger shows in memory as well, for a console inside
+/// the app such as the editor's. Off until [`start`](Self::start); records from before
+/// that are not kept.
+///
+/// ```
+/// use cg_platform::LogCapture;
+///
+/// LogCapture::start(1000);
+/// log::warn!("careful");
+/// for line in LogCapture::take() {
+///     println!("{}: {}", line.level, line.message);
+/// }
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct LogCapture;
+
+impl LogCapture {
+    /// Starts keeping records, at most `capacity` of them (the oldest go first).
+    pub fn start(capacity: usize) {
+        CAPTURED
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .capacity = capacity.max(1);
+        CAPTURING.store(true, Ordering::Release);
+    }
+
+    /// Stops keeping records and drops those not taken yet.
+    pub fn stop() {
+        CAPTURING.store(false, Ordering::Release);
+        CAPTURED
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .lines
+            .clear();
+    }
+
+    /// Whether records are being kept.
+    pub fn is_started() -> bool {
+        CAPTURING.load(Ordering::Acquire)
+    }
+
+    /// The records kept since the last call, oldest first.
+    pub fn take() -> Vec<LogLine> {
+        let mut captured = CAPTURED.lock().unwrap_or_else(PoisonError::into_inner);
+        captured.lines.drain(..).collect()
+    }
+
+    /// Keeps `record` if capturing; the loggers call it for every record they show.
+    fn record(record: &log::Record) {
+        if !CAPTURING.load(Ordering::Acquire) {
+            return;
+        }
+        let line = LogLine {
+            level: record.level(),
+            target: record.target().to_owned(),
+            message: record.args().to_string(),
+        };
+        let mut captured = CAPTURED.lock().unwrap_or_else(PoisonError::into_inner);
+        while captured.lines.len() >= captured.capacity {
+            captured.lines.pop_front();
+        }
+        captured.lines.push_back(line);
+    }
+}
+
 #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
 fn init(level: LevelFilter) {
     let mut filter = level.as_str().to_lowercase();
@@ -48,8 +138,36 @@ fn init(level: LevelFilter) {
         filter.push_str(&format!(",{target}={}", level.as_str().to_lowercase()));
     }
     let env = env_logger::Env::default().default_filter_or(filter);
+    let inner = env_logger::Builder::from_env(env).build();
+    let max = inner.filter();
     // A logger may already be installed, by a test harness for example; keep it.
-    let _ = env_logger::Builder::from_env(env).try_init();
+    if log::set_boxed_logger(Box::new(TerminalLogger { inner })).is_ok() {
+        log::set_max_level(max);
+    }
+}
+
+/// `env_logger`'s output, with records kept for [`LogCapture`] too.
+#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+struct TerminalLogger {
+    inner: env_logger::Logger,
+}
+
+#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+impl log::Log for TerminalLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        self.inner.enabled(metadata)
+    }
+
+    fn log(&self, record: &log::Record) {
+        if self.inner.matches(record) {
+            self.inner.log(record);
+            LogCapture::record(record);
+        }
+    }
+
+    fn flush(&self) {
+        self.inner.flush();
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -92,6 +210,7 @@ impl log::Log for ConsoleLogger {
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
             console_log::log(record);
+            LogCapture::record(record);
         }
     }
 
@@ -137,6 +256,7 @@ impl log::Log for LogcatLogger {
         if self.enabled(record.metadata()) {
             let text = format!("{}: {}", record.target(), record.args());
             logcat::write(record.level(), &text);
+            LogCapture::record(record);
         }
     }
 

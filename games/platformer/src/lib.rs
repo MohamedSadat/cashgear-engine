@@ -12,8 +12,11 @@
 //! - Android: `games/platformer/android` holds the Android library (one line that hands
 //!   [`run`] to the engine) and the Gradle project that builds the APK; see its README.
 //!
+//! - The editor: `cargo run -p platformer_editor` opens level 1 in the scene editor with
+//!   the game built in, so Play runs the level being edited (see `games/platformer/editor`).
+//!
 //! The game is this library's [`run`]; `src/main.rs` (desktop and web) and the Android
-//! library call it.
+//! library call it. The editor builds the same [`Game`] with [`engine_plugins`].
 //!
 //! | Action | Keyboard | Gamepad | Touch |
 //! | --- | --- | --- | --- |
@@ -60,6 +63,8 @@ use cashgear_engine::prelude::*;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Screen {
     Loading,
+    /// Idle while the scene editor edits a level (instead of the title screen).
+    Editor,
     Title,
     Levels,
     Settings,
@@ -86,11 +91,24 @@ pub(crate) enum GameSystems {
 
 /// Options from the command line (or the page's query string).
 #[derive(Resource, Debug, Clone, Copy, Default)]
-pub(crate) struct Options {
-    /// The bot plays.
+pub struct Options {
+    /// The bot plays (`--demo`).
     pub demo: bool,
-    /// Start in this level (0-based), skipping the menus.
+    /// Start in this level (0-based; `--level N` counts from 1), skipping the menus.
     pub level: Option<usize>,
+}
+
+impl Options {
+    /// Reads `--demo` and `--level N`.
+    pub fn from_args(args: &Args) -> Self {
+        Self {
+            demo: args.flag("demo"),
+            level: args
+                .value("level")
+                .and_then(|n| n.parse::<usize>().ok())
+                .map(|n| n.clamp(1, level::LEVELS.len()) - 1),
+        }
+    }
 }
 
 /// The game's assets, all loaded before the title screen.
@@ -130,50 +148,57 @@ pub(crate) struct Sounds {
 /// window and every engine plugin, reading `--demo` and `--level N` from the command line
 /// or the page's query string.
 pub fn run() -> AppExit {
-    let args = Args::from_env();
-    let options = Options {
-        demo: args.flag("demo"),
-        level: args
-            .value("level")
-            .and_then(|n| n.parse::<usize>().ok())
-            .map(|n| n.clamp(1, level::LEVELS.len()) - 1),
-    };
+    let options = Options::from_args(&Args::from_env());
     App::new()
-        .add_plugins(DefaultPlugins {
-            window: WindowConfig {
-                title: "CashGear Platformer".into(),
-                canvas_id: Some("cashgear".into()),
-                ..default()
-            },
-            // The demo must not change the player's saves, so it keeps them in memory.
-            storage: StoragePlugin {
-                namespace: Some("cashgear-platformer".into()),
-                memory: options.demo,
-            },
-            ui: UiPlugin {
-                locale: Some(LocaleSettings::new(&["en", "ar"])),
-                ..default()
-            },
-            ..default()
-        })
+        .add_plugins(engine_plugins(&options))
         .add_plugins(Game { options })
         .run()
 }
 
-/// Everything but the engine's plugins, so the tests can build the game without a window.
-pub(crate) struct Game {
+/// The engine's plugins as the game sets them up: its window, its save namespace (in
+/// memory for the demo, so it never changes the player's saves) and its languages.
+pub fn engine_plugins(options: &Options) -> DefaultPlugins {
+    DefaultPlugins {
+        window: WindowConfig {
+            title: "CashGear Platformer".into(),
+            canvas_id: Some("cashgear".into()),
+            ..default()
+        },
+        storage: StoragePlugin {
+            namespace: Some("cashgear-platformer".into()),
+            memory: options.demo,
+        },
+        ui: UiPlugin {
+            locale: Some(LocaleSettings::new(&["en", "ar"])),
+            ..default()
+        },
+        ..default()
+    }
+}
+
+/// The game: everything but the engine's plugins, so the tests can build it without a
+/// window. With the scene editor added first ([`EditMode`] present), it waits on its
+/// `Editor` screen instead of the title, plays the edited level when the editor's Play is
+/// pressed and goes back when Stop is.
+pub struct Game {
+    /// The launch options.
     pub options: Options,
 }
 
 impl Plugin for Game {
     fn build(&self, app: &mut App) {
         use Screen::Loading;
+        let first = if app.world().contains_resource::<EditMode>() {
+            Screen::Editor
+        } else {
+            Screen::Title
+        };
         app.insert_resource(self.options)
             // The window's messages; the tests run without one.
             .add_message::<Lifecycle>()
             .load_prefab("Dust", "prefabs/dust.prefab.ron")
             .init_state(Loading)
-            .add_loading_state(Loading, Screen::Title)
+            .add_loading_state(Loading, first)
             .add_state_fade::<Screen>()
             .configure_sets(
                 FixedUpdate,
@@ -187,6 +212,7 @@ impl Plugin for Game {
                     .run_if(in_state(Screen::Playing)),
             )
             .add_systems(Startup, setup)
+            .add_systems(PreUpdate, level::play_in_editor.run_if(in_editor))
             .add_systems(OnEnter(Loading), menus::spawn_loading)
             .add_systems(Update, menus::show_loading.run_if(in_state(Loading)));
         controls::plugin(app);

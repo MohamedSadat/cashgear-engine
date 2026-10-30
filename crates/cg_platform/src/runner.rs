@@ -445,6 +445,13 @@ impl ApplicationHandler for Runner {
     ) {
         match event {
             WindowEvent::RedrawRequested => self.frame(event_loop),
+            WindowEvent::CloseRequested if self.app.world().resource::<Window>().close_guard => {
+                // The app decides: an editor asks about unsaved changes first.
+                self.lifecycle(Lifecycle::CloseRequested);
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
             WindowEvent::CloseRequested => {
                 log::info!("window closed");
                 self.exit(event_loop, AppExit::Success);

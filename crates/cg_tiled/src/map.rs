@@ -102,6 +102,45 @@ impl TiledMap {
         }
     }
 
+    /// The tile a global tile id (`gid`, as TMX files store them) names, flip bits
+    /// included, or `None` for 0 or an id no tileset of the map covers.
+    pub fn tile_for_gid(&self, gid: u32) -> Option<LayerTile> {
+        let id = gid & !GID_FLAGS;
+        let (tileset, first) = self
+            .tilesets
+            .iter()
+            .enumerate()
+            .filter(|(_, tileset)| tileset.first_gid > 0 && tileset.first_gid <= id)
+            .max_by_key(|(_, tileset)| tileset.first_gid)?;
+        let local = id - first.first_gid;
+        (local < first.tile_count.max(1)).then_some(LayerTile {
+            tileset,
+            id: local,
+            flip_x: gid & GID_FLIP_X != 0,
+            flip_y: gid & GID_FLIP_Y != 0,
+            flip_diagonal: gid & GID_FLIP_DIAGONAL != 0,
+        })
+    }
+
+    /// The global tile id a TMX file stores for `tile`, flip bits included; 0 if its
+    /// tileset is not one of the map's own (a template's tileset, say).
+    pub fn gid(&self, tile: LayerTile) -> u32 {
+        let Some(tileset) = self.tilesets.get(tile.tileset).filter(|t| t.first_gid > 0) else {
+            return 0;
+        };
+        let mut gid = tileset.first_gid + tile.id;
+        for (flag, set) in [
+            (GID_FLIP_X, tile.flip_x),
+            (GID_FLIP_Y, tile.flip_y),
+            (GID_FLIP_DIAGONAL, tile.flip_diagonal),
+        ] {
+            if set {
+                gid |= flag;
+            }
+        }
+        gid
+    }
+
     /// The class and properties a tileset gives this tile, if any.
     pub fn tile_info(&self, tile: LayerTile) -> Option<&TileInfo> {
         self.tilesets.get(tile.tileset)?.tiles.get(&tile.id)
@@ -118,6 +157,15 @@ impl TiledMap {
         })
     }
 }
+
+/// The bit of a global tile id that flips the tile horizontally.
+const GID_FLIP_X: u32 = 0x8000_0000;
+/// The bit that flips it vertically.
+const GID_FLIP_Y: u32 = 0x4000_0000;
+/// The bit that flips it across its diagonal.
+const GID_FLIP_DIAGONAL: u32 = 0x2000_0000;
+/// All of Tiled's flag bits (the fourth turns hexagonal tiles).
+const GID_FLAGS: u32 = 0xf000_0000;
 
 /// A tileset: a grid of tiles cut from one image.
 #[derive(Debug, Clone)]

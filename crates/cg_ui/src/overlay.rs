@@ -32,6 +32,10 @@ pub struct DebugOverlay {
     pub open: bool,
     /// The key that opens and closes it.
     pub key: Option<KeyCode>,
+    /// Whether the overlay draws its own windows (frame times, render stats, entities and
+    /// the inspector) and the UI outlines. On by default; a tool that draws its own egui
+    /// panels through [`EguiContext`], such as the editor, turns it off.
+    pub windows: bool,
     /// Outline every UI node's rectangle.
     pub ui_outlines: bool,
     /// The entity shown in the inspector.
@@ -91,6 +95,14 @@ impl Inspector {
         self.types.insert(TypeId::of::<T>(), |world, entity| {
             world.get::<T>(entity).map(|c| format!("{c:#?}"))
         });
+    }
+
+    /// The `Debug` text of `entity`'s component of type `type_id`, if that type is
+    /// registered and the entity has one. The editor shows spawned objects with it.
+    pub fn describe(&self, world: &World, entity: Entity, type_id: TypeId) -> Option<String> {
+        self.types
+            .get(&type_id)
+            .and_then(|show| show(world, entity))
     }
 }
 
@@ -217,6 +229,7 @@ pub(crate) fn build(app: &mut App, key: Option<KeyCode>, open: bool) {
     app.insert_resource(DebugOverlay {
         open,
         key,
+        windows: true,
         ui_outlines: false,
         selected: None,
         filter: String::new(),
@@ -465,7 +478,9 @@ fn draw_overlay(world: &mut World) {
         return;
     };
     world.resource_scope::<DebugOverlay, _>(|world, mut overlay| {
-        windows(&ctx, world, &mut overlay);
+        if overlay.windows {
+            windows(&ctx, world, &mut overlay);
+        }
     });
     let output = ctx.end_pass();
     world.resource_mut::<EguiContext>().running = false;

@@ -61,6 +61,11 @@ pub struct Window {
     pub(crate) fullscreen_request: Option<bool>,
     /// Physical pixels at each edge covered by a display cutout: left, top, right, bottom.
     pub(crate) safe_insets: [u32; 4],
+    /// Physical pixels at each edge kept for a tool drawn over the window (an editor's
+    /// panels): left, top, right, bottom.
+    pub(crate) view_insets: [u32; 4],
+    /// Closing the window asks the app (`Lifecycle::CloseRequested`) instead of exiting.
+    pub(crate) close_guard: bool,
 }
 
 impl Default for Window {
@@ -77,6 +82,8 @@ impl Default for Window {
             can_fullscreen: false,
             fullscreen_request: None,
             safe_insets: [0; 4],
+            view_insets: [0; 4],
+            close_guard: false,
         }
     }
 }
@@ -97,6 +104,8 @@ impl Window {
             can_fullscreen: true,
             fullscreen_request: None,
             safe_insets: [0; 4],
+            view_insets: [0; 4],
+            close_guard: false,
         }
     }
 
@@ -134,12 +143,43 @@ impl Window {
     /// so the bars cover the cutout. The whole window on desktop and the web; on Android
     /// it comes from the engine's activity (`CashGearActivity`) and changes when the
     /// window does.
+    ///
+    /// The [`view_insets`](Self::view_insets) a tool keeps at the edges count as covered
+    /// too, so the view, the UI and pointer conversions fit between an editor's panels.
     pub fn safe_area(&self) -> Rect {
         let size = self.physical_size.as_vec2();
-        let [left, top, right, bottom] = self.safe_insets.map(|inset| inset as f32);
+        let insets: [u32; 4] =
+            core::array::from_fn(|i| self.safe_insets[i].max(self.view_insets[i]));
+        let [left, top, right, bottom] = insets.map(|inset| inset as f32);
         let min = Vec2::new(left, top).min(size);
         let max = (size - Vec2::new(right, bottom)).max(min);
         Rect { min, max }
+    }
+
+    /// Physical pixels kept clear of the view at the left, top, right and bottom edges by a
+    /// tool drawn over the window, such as the editor's panels. Zero unless a tool sets them.
+    pub fn view_insets(&self) -> [u32; 4] {
+        self.view_insets
+    }
+
+    /// Keeps `insets` physical pixels at the left, top, right and bottom edges clear of the
+    /// view (see [`safe_area`](Self::safe_area)). The editor sets them to the space its
+    /// panels take; the runner never changes them.
+    pub fn set_view_insets(&mut self, insets: [u32; 4]) {
+        self.view_insets = insets;
+    }
+
+    /// Whether closing the window asks the app first (see
+    /// [`set_close_guard`](Self::set_close_guard)).
+    pub fn close_guard(&self) -> bool {
+        self.close_guard
+    }
+
+    /// While on, closing the window (its close button, Alt+F4) does not exit: the runner
+    /// writes [`Lifecycle::CloseRequested`] and the app decides, writing `AppExit` when it
+    /// is ready. The editor turns it on to ask about unsaved changes. Off by default.
+    pub fn set_close_guard(&mut self, guard: bool) {
+        self.close_guard = guard;
     }
 
     /// Whether the window has keyboard focus.
@@ -243,6 +283,9 @@ pub enum Lifecycle {
         /// New physical pixels per logical pixel.
         scale_factor: f64,
     },
+    /// The user asked to close the window while [`Window::close_guard`] is on; the app
+    /// exits only if it writes `AppExit`.
+    CloseRequested,
 }
 
 /// A schedule the runner runs at once when the app is suspended or resumed, or the window

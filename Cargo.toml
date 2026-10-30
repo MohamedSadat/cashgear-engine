@@ -1,7 +1,8 @@
 [workspace]
 resolver = "3"
 # `games/platformer/android` is the platformer's Android entry point (a cdylib).
-members = ["crates/*", "examples/*", "games/*", "games/platformer/android", "tools/*"]
+# `games/platformer/editor` is the platformer with the scene editor built in (desktop only).
+members = ["crates/*", "examples/*", "games/*", "games/platformer/android", "games/platformer/editor", "tools/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -19,6 +20,7 @@ cg_anim = { path = "crates/cg_anim" }
 cg_assets = { path = "crates/cg_assets" }
 cg_audio = { path = "crates/cg_audio" }
 cg_core = { path = "crates/cg_core" }
+cg_editor = { path = "tools/cg_editor" }
 cg_physics = { path = "crates/cg_physics" }
 cg_platform = { path = "crates/cg_platform" }
 cg_render = { path = "crates/cg_render" }
