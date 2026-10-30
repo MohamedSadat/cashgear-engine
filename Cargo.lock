@@ -695,6 +695,7 @@ dependencies = [
  "env_logger",
  "gilrs",
  "glam 0.34.1",
+ "jni",
  "js-sys",
  "log",
  "miniz_oxide 0.9.1",
@@ -2812,6 +2813,14 @@ dependencies = [
  "pollster",
  "ron",
  "serde",
+]
+
+[[package]]
+name = "platformer_android"
+version = "0.1.0"
+dependencies = [
+ "cashgear_engine",
+ "platformer",
 ]
 
 [[package]]

@@ -193,7 +193,7 @@ const ROWS: [(Option<Bus>, u32, &str); 4] = [
     (Some(Bus::Ui), 0x4cc9f0, "Menus"),
 ];
 
-fn main() {
+fn main() -> AppExit {
     let demo = Args::from_env().flag("demo");
     let mut app = App::new();
     app.add_plugins(DefaultPlugins {
@@ -214,7 +214,7 @@ fn main() {
         ..default()
     })
     .add_plugins(Game { demo });
-    app.run();
+    app.run()
 }
 
 /// Everything but the engine's plugins, so the tests can build it without a window.

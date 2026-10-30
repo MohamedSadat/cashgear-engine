@@ -5,7 +5,7 @@
 //! | --- | --- | --- |
 //! | Desktop | The asset folder on disk | Yes, with `notify` |
 //! | Web | The page's server, with `fetch` | No |
-//! | Android | APK assets (Phase 11; an error until then) | No |
+//! | Android | The APK's `assets/` folder | No |
 //!
 //! Paths are relative to the asset root and use `/`, like `maps/level1.tmx`, on every
 //! target. Reads are `async`: on desktop the future is ready at once, on the web it
@@ -14,7 +14,8 @@
 //! A [`Bundle`] (the whole asset folder in one file, made by `cg_pack bundle`) can stand in
 //! for the folder: [`AssetIo`] reads files from it first, and from the folder only when the
 //! bundle lacks them. On the web, the page can download the bundle while the game's code
-//! loads, and hand it over as `window.cashgearBundle`.
+//! loads, and hand it over as `window.cashgearBundle`; on Android, a bundle named
+//! [`BUNDLE_FILE`] in the APK's assets is used without being asked for.
 
 // The only engine code that touches the file system and the clock directly.
 #![allow(clippy::disallowed_methods)]
@@ -22,6 +23,10 @@
 mod bundle;
 
 pub use bundle::{BUNDLE_MAGIC, BUNDLE_VERSION, Bundle, BundleError};
+
+/// The usual name of a game's bundle: what `cg_pack trunk-bundle` writes next to a web page
+/// and the Android build puts in the APK's assets, where [`AssetIo`] finds it by itself.
+pub const BUNDLE_FILE: &str = "assets.cgpak";
 
 use core::fmt;
 use core::future::Future;
@@ -64,10 +69,12 @@ impl std::error::Error for IoError {}
 ///   `assets` in the working directory.
 /// - Web: `assets/`, relative to the page, so `trunk` can copy the folder next to
 ///   `index.html` (`<link data-trunk rel="copy-dir" href="assets" />`).
+/// - Android: the APK's `assets/` folder, read through the asset manager.
 ///
 /// Files are read from a [`Bundle`] first when there is one: one given with
-/// [`with_bundle`](Self::with_bundle), or on the web the one the page downloaded (a
-/// promise of an `ArrayBuffer` in `window.cashgearBundle`, looked for on the first read).
+/// [`with_bundle`](Self::with_bundle), on the web the one the page downloaded (a promise
+/// of an `ArrayBuffer` in `window.cashgearBundle`, looked for on the first read), and on
+/// Android [`BUNDLE_FILE`] in the APK's assets (read once per process).
 ///
 /// ```no_run
 /// # async fn demo() -> Result<(), cg_platform::io::IoError> {
@@ -96,21 +103,16 @@ impl AssetIo {
     /// given root is a folder on desktop and a URL prefix on the web.
     pub fn new(root: Option<&str>) -> Self {
         let root = root.map_or_else(default_root, str::to_owned);
-        // Only a page can hand over a bundle unasked, so only the web looks for one.
-        let state = if cfg!(target_arch = "wasm32") {
-            BundleState::Unchecked
-        } else {
-            BundleState::Missing
-        };
         Self {
             root,
-            bundle: Arc::new(BundleSlot::new(None, state)),
+            bundle: Arc::new(BundleSlot::new(None, platform_bundle())),
         }
     }
 
     /// Reads files from the bundle at `path` first: a file on desktop (relative to the
     /// working directory), a URL relative to the page on the web, fetched on the first read
-    /// unless the page has handed over a bundle already. Without a bundle there, or with a
+    /// unless the page has handed over a bundle already, a file in the APK's assets on
+    /// Android. Without a bundle there, or with a
     /// broken one (logged), files are read from the root as usual.
     pub fn with_bundle(mut self, path: &str) -> Self {
         self.bundle = Arc::new(BundleSlot::new(Some(path.to_owned()), open_bundle(path)));
@@ -129,8 +131,8 @@ impl AssetIo {
         &self.root
     }
 
-    /// The bundle files are read from, once known: on desktop from the start, on the web
-    /// after the first read.
+    /// The bundle files are read from, once known: on desktop and Android from the start, on
+    /// the web after the first read.
     pub fn bundle(&self) -> Option<Arc<Bundle>> {
         self.bundle.known().flatten()
     }
@@ -210,9 +212,21 @@ impl BundleSlot {
     }
 }
 
+/// The bundle a new [`AssetIo`] starts with: the web looks for the page's on the first
+/// read, Android uses the APK's, desktop has none unless asked.
+fn platform_bundle() -> BundleState {
+    if cfg!(target_arch = "wasm32") {
+        return BundleState::Unchecked;
+    }
+    #[cfg(target_os = "android")]
+    if let Some(bundle) = crate::android::apk_bundle() {
+        return BundleState::Ready(bundle);
+    }
+    BundleState::Missing
+}
+
 /// Logs what a bundle holds, or why it is not used, and keeps it if it is good.
-#[cfg_attr(target_os = "android", expect(dead_code))]
-fn accept_bundle(path: &str, parsed: Result<Bundle, BundleError>) -> Option<Bundle> {
+pub(crate) fn accept_bundle(path: &str, parsed: Result<Bundle, BundleError>) -> Option<Bundle> {
     match parsed {
         Ok(bundle) => {
             log::info!(
@@ -249,8 +263,14 @@ fn open_bundle(_path: &str) -> BundleState {
 
 #[cfg(target_os = "android")]
 fn open_bundle(path: &str) -> BundleState {
-    log::warn!("asset bundles on Android arrive with Phase 11; not reading `{path}`");
-    BundleState::Missing
+    match crate::android::read_asset(path) {
+        Ok(bytes) => accept_bundle(path, Bundle::parse(bytes))
+            .map_or(BundleState::Missing, |b| BundleState::Ready(Arc::new(b))),
+        Err(err) => {
+            log::warn!("no asset bundle at `{path}` in the APK ({err}); reading files one by one");
+            BundleState::Missing
+        }
+    }
 }
 
 #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
@@ -413,11 +433,18 @@ mod web {
     }
 }
 
+/// The root is a folder inside the APK's `assets/` (empty for `assets/` itself).
 #[cfg(target_os = "android")]
-async fn read(_root: String, _path: String) -> Result<Vec<u8>, IoError> {
-    Err(IoError::Unsupported(
-        "reading APK assets arrives with the Android build (Phase 11)".into(),
-    ))
+async fn read(root: String, path: String) -> Result<Vec<u8>, IoError> {
+    let full = if root.is_empty() {
+        path.clone()
+    } else {
+        format!("{}/{path}", root.trim_end_matches('/'))
+    };
+    crate::android::read_asset(&full).map_err(|err| match err {
+        IoError::NotFound(_) => IoError::NotFound(path),
+        other => other,
+    })
 }
 
 /// Watches the asset folder and reports files that changed, for hot reloading.

@@ -21,12 +21,19 @@ web-time.workspace = true
 winit = { workspace = true, features = ["serde"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-env_logger.workspace = true
 pollster.workspace = true
 
-# Hot reloading watches the asset folder; Android reads from the APK instead.
+# Hot reloading watches the asset folder; Android reads from the APK instead. Android logs
+# to logcat.
 [target.'cfg(not(any(target_arch = "wasm32", target_os = "android")))'.dependencies]
+env_logger.workspace = true
 notify.workspace = true
+
+# winit drives Android's NativeActivity (through android-activity); the engine's Java
+# activity keeps a little state that is read through JNI.
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
+winit = { workspace = true, features = ["android-native-activity"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook.workspace = true

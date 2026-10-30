@@ -35,7 +35,7 @@ CashGear Engine is a Rust 2D game engine for desktop, web and Android, proven by
 | Scripting | `mlua` (Lua 5.4 / Luau) | Web strategy decided in phase 12 |
 | Profiling | `puffin` (+ Tracy optional) |  |
 | Web tooling | `trunk`, `wasm-bindgen`, `wasm-opt` |  |
-| Android tooling | `cargo-apk` or `xbuild` | Chosen in phase 11 |
+| Android tooling | `cargo-ndk` + Gradle (Android Gradle plugin) | Chosen in phase 11: `cargo-apk` is deprecated and `xbuild` unmaintained |
 | Logging / errors | `log`, `env_logger`, `console_log`, `thiserror`, `anyhow` |  |
 
 ## Agent workflow rules

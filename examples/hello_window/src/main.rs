@@ -39,7 +39,7 @@ struct Status {
     last_report: f64,
 }
 
-fn main() {
+fn main() -> AppExit {
     App::new()
         .add_plugins(DefaultPlugins {
             window: WindowConfig {
@@ -66,7 +66,7 @@ fn main() {
             )
                 .chain(),
         )
-        .run();
+        .run()
 }
 
 fn action_map() -> ActionMap {

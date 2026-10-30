@@ -5,7 +5,7 @@
 //! | --- | --- |
 //! | Desktop | One file per key in a folder per game: `%APPDATA%\CashGear\<namespace>` on Windows, `~/Library/Application Support/CashGear/<namespace>` on macOS, `$XDG_DATA_HOME/cashgear/<namespace>` (else `~/.local/share/cashgear/<namespace>`) on Linux. `CG_SAVE_DIR` replaces the per-user folder. |
 //! | Web | The page's `localStorage`, under `cashgear/<namespace>/<key>` |
-//! | Android | Not yet (Phase 11): reads find nothing and writes fail with [`StorageError::Unsupported`] |
+//! | Android | One file per key in a folder per game inside the app's private files folder (`Context.getFilesDir()`), removed with the app |
 //!
 //! Values are text, so serialize with RON or JSON. Reads and writes are synchronous and
 //! meant for small values (settings, a save slot), not for streaming data.
@@ -239,12 +239,12 @@ fn default_namespace() -> String {
 }
 
 /// One file per key in the game's save folder.
-#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+#[cfg(not(target_arch = "wasm32"))]
 struct PlatformStorage {
     dir: Option<std::path::PathBuf>,
 }
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+#[cfg(not(target_arch = "wasm32"))]
 impl PlatformStorage {
     fn new(namespace: &str) -> Self {
         Self {
@@ -254,12 +254,16 @@ impl PlatformStorage {
 
     fn path(&self, key: &str) -> Result<std::path::PathBuf, StorageError> {
         self.dir.as_ref().map(|dir| dir.join(key)).ok_or_else(|| {
-            StorageError::Unsupported("no folder for saves: set CG_SAVE_DIR or HOME".to_owned())
+            StorageError::Unsupported(if cfg!(target_os = "android") {
+                "no folder for saves: the app's files folder is unknown".to_owned()
+            } else {
+                "no folder for saves: set CG_SAVE_DIR or HOME".to_owned()
+            })
         })
     }
 }
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+#[cfg(not(target_arch = "wasm32"))]
 fn other(key: &str, err: std::io::Error) -> StorageError {
     StorageError::Other {
         key: key.to_owned(),
@@ -267,7 +271,7 @@ fn other(key: &str, err: std::io::Error) -> StorageError {
     }
 }
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+#[cfg(not(target_arch = "wasm32"))]
 impl StorageBackend for PlatformStorage {
     fn read(&self, key: &str) -> Result<Option<String>, StorageError> {
         match std::fs::read_to_string(self.path(key)?) {
@@ -387,36 +391,10 @@ impl StorageBackend for PlatformStorage {
     }
 }
 
-/// No storage on Android until Phase 11.
+/// The app's private files folder, which holds every save folder of the app.
 #[cfg(target_os = "android")]
-struct PlatformStorage;
-
-#[cfg(target_os = "android")]
-impl PlatformStorage {
-    fn new(_namespace: &str) -> Self {
-        Self
-    }
-}
-
-#[cfg(target_os = "android")]
-impl StorageBackend for PlatformStorage {
-    fn read(&self, _key: &str) -> Result<Option<String>, StorageError> {
-        Ok(None)
-    }
-
-    fn write(&self, _key: &str, _value: &str) -> Result<(), StorageError> {
-        Err(StorageError::Unsupported(
-            "save storage on Android arrives in Phase 11".to_owned(),
-        ))
-    }
-
-    fn remove(&self, _key: &str) -> Result<(), StorageError> {
-        Ok(())
-    }
-
-    fn location(&self) -> String {
-        "nowhere (Android storage arrives in Phase 11)".to_owned()
-    }
+fn save_root() -> Option<std::path::PathBuf> {
+    crate::android::data_dir()
 }
 
 #[cfg(test)]

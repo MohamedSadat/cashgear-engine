@@ -36,6 +36,17 @@ impl AppExit {
     }
 }
 
+/// Lets `fn main() -> AppExit { app.run() }` end the process with the exit's code (0 for
+/// [`AppExit::Success`]), so a script or CI sees a game that failed.
+impl std::process::Termination for AppExit {
+    fn report(self) -> std::process::ExitCode {
+        match self {
+            Self::Success => std::process::ExitCode::SUCCESS,
+            Self::Error(code) => std::process::ExitCode::from(code.get()),
+        }
+    }
+}
+
 /// Exits the app with [`AppExit::Success`] once this many frames have run.
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FrameLimit(pub u64);

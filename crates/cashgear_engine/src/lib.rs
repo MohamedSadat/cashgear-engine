@@ -20,12 +20,12 @@
 //!     }
 //! }
 //!
-//! fn main() {
+//! fn main() -> AppExit {
 //!     App::new()
 //!         .add_plugins(DefaultPlugins::default())
 //!         .add_systems(Startup, setup)
 //!         .add_systems(Update, spin)
-//!         .run();
+//!         .run()
 //! }
 //! ```
 
@@ -57,6 +57,39 @@ use cg_world::WorldPlugin;
 
 /// The engine version, taken from the crate manifest.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Declares a game's Android entry point: the `android_main` function that the APK's
+/// activity calls on its own thread. It hands the app to the engine, then calls `$run`, the
+/// function that builds and runs the game (the same one the desktop `main` calls). Put it
+/// in the crate that builds the game's Android library (a `cdylib`); on other targets it
+/// expands to nothing.
+///
+/// ```no_run
+/// use cashgear_engine::prelude::*;
+///
+/// pub fn run() -> AppExit {
+///     App::new().add_plugins(DefaultPlugins::default()).run()
+/// }
+///
+/// cashgear_engine::android_main!(run);
+/// # fn main() {}
+/// ```
+///
+/// Launch flags come from the intent's `args` extra there:
+/// `adb shell am start -n <app id>/com.cashgear.engine.CashGearActivity --es args "--demo"`.
+#[macro_export]
+macro_rules! android_main {
+    ($run:path) => {
+        /// The entry point `android-activity` calls when the activity starts.
+        #[cfg(target_os = "android")]
+        #[unsafe(no_mangle)]
+        fn android_main(app: $crate::platform::android::AndroidApp) {
+            $crate::platform::android::run(app, || {
+                let _ = $run();
+            });
+        }
+    };
+}
 
 /// The standard set of plugins for a game: logging, the `--frames N` flag, input, save
 /// storage, the world (transforms, interpolation, prefabs), assets, the window with its

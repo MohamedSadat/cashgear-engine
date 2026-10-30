@@ -101,7 +101,9 @@ impl OffscreenRenderer {
             screen_sprites: sprites.screen_queued(),
             shapes,
             scale_factor: 1.0,
+            area: cg_core::Rect::from_min_size(cg_core::glam::Vec2::ZERO, size.as_vec2()),
         };
+
         self.painter
             .render(&self.device, &self.queue, &target, size, &input, None);
         self.read_back(&texture, size)

@@ -3,7 +3,7 @@
 use cg_core::ecs::prelude::*;
 use cg_core::ecs::schedule::ScheduleLabel;
 use cg_core::glam::{UVec2, Vec2};
-use cg_core::{App, Plugin};
+use cg_core::{App, Plugin, Rect};
 use std::sync::Arc;
 
 /// Settings for the game window.
@@ -59,6 +59,8 @@ pub struct Window {
     pub(crate) can_fullscreen: bool,
     /// A change asked for by the game, applied by the runner after the frame.
     pub(crate) fullscreen_request: Option<bool>,
+    /// Physical pixels at each edge covered by a display cutout: left, top, right, bottom.
+    pub(crate) safe_insets: [u32; 4],
 }
 
 impl Default for Window {
@@ -74,6 +76,7 @@ impl Default for Window {
             fullscreen: false,
             can_fullscreen: false,
             fullscreen_request: None,
+            safe_insets: [0; 4],
         }
     }
 }
@@ -93,6 +96,7 @@ impl Window {
             fullscreen: false,
             can_fullscreen: true,
             fullscreen_request: None,
+            safe_insets: [0; 4],
         }
     }
 
@@ -100,6 +104,13 @@ impl Window {
     /// [`touch_screen`](Self::touch_screen)), for tests.
     pub fn with_touch_screen(mut self, touch_screen: bool) -> Self {
         self.touch_screen = touch_screen;
+        self
+    }
+
+    /// The same window with a display cutout covering `left`, `top`, `right` and `bottom`
+    /// physical pixels at its edges (see [`safe_area`](Self::safe_area)), for tests.
+    pub fn with_safe_insets(mut self, left: u32, top: u32, right: u32, bottom: u32) -> Self {
+        self.safe_insets = [left, top, right, bottom];
         self
     }
 
@@ -116,6 +127,19 @@ impl Window {
     /// Physical pixels per logical pixel (the device pixel ratio on the web).
     pub fn scale_factor(&self) -> f64 {
         self.scale_factor
+    }
+
+    /// The part of the window that no display cutout (a notch, a punch-hole camera) covers,
+    /// in physical pixels from the top-left. The renderer fits the camera's view inside it,
+    /// so the bars cover the cutout. The whole window on desktop and the web; on Android
+    /// it comes from the engine's activity (`CashGearActivity`) and changes when the
+    /// window does.
+    pub fn safe_area(&self) -> Rect {
+        let size = self.physical_size.as_vec2();
+        let [left, top, right, bottom] = self.safe_insets.map(|inset| inset as f32);
+        let min = Vec2::new(left, top).min(size);
+        let max = (size - Vec2::new(right, bottom)).max(min);
+        Rect { min, max }
     }
 
     /// Whether the window has keyboard focus.
@@ -148,15 +172,16 @@ impl Window {
     }
 
     /// Whether the game fills the screen: a borderless fullscreen window on desktop, the
-    /// canvas in the browser's fullscreen mode on the web. It follows changes made outside
-    /// the game too, such as Escape leaving fullscreen in a browser.
+    /// canvas in the browser's fullscreen mode on the web, always on Android (immersive,
+    /// with the system bars hidden). It follows changes made outside the game too, such as
+    /// Escape leaving fullscreen in a browser.
     pub fn fullscreen(&self) -> bool {
         self.fullscreen_request.unwrap_or(self.fullscreen)
     }
 
     /// Whether [`set_fullscreen`](Self::set_fullscreen) can work here: on desktop, and in
     /// browsers that let a page go fullscreen (not Safari on iPhone). Hide a fullscreen
-    /// setting where this is false. False on Android until Phase 11.
+    /// setting where this is false. False on Android, where games are always fullscreen.
     pub fn can_fullscreen(&self) -> bool {
         self.can_fullscreen
     }
@@ -189,6 +214,11 @@ impl WindowHandle {
 
 /// Window and app lifecycle changes, written by the runner. Read them with a
 /// `MessageReader<Lifecycle>` in [`Update`](cg_core::Update).
+///
+/// On Android, leaving the app (home, another app, the screen turning off) sends
+/// `Focused(false)` and then `Suspended`; coming back sends `Resumed` and `Focused(true)`.
+/// Android's back button arrives as a key instead:
+/// [`KeyCode::BrowserBack`](crate::input::KeyCode::BrowserBack).
 #[derive(Message, Debug, Clone, Copy, PartialEq)]
 pub enum Lifecycle {
     /// The app can run and draw: at start, and when returning from the background on
@@ -226,7 +256,7 @@ pub enum Lifecycle {
 #[derive(ScheduleLabel, Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LifecycleChanged;
 
-/// Opens the window and makes it drive the app's frames on desktop and web.
+/// Opens the window and makes it drive the app's frames on desktop, web and Android.
 ///
 /// Add [`InputPlugin`](crate::input::InputPlugin) too, so the runner has input resources to
 /// feed.

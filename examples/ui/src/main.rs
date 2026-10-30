@@ -97,7 +97,7 @@ enum Screen {
     Paused,
 }
 
-fn main() {
+fn main() -> AppExit {
     let args = Args::from_env();
     App::new()
         .add_plugins(DefaultPlugins {
@@ -119,7 +119,7 @@ fn main() {
         .add_plugins(Example {
             demo: args.flag("demo"),
         })
-        .run();
+        .run()
 }
 
 /// Everything but the engine's plugins, so the test can build it without a window.

@@ -3,7 +3,32 @@
 All notable changes to CashGear Engine are recorded here, one section per phase.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Phase 11 — Android build
+
+### Added
+
+- The platformer on Android: `games/platformer/android` holds the game's Android library (`platformer_android`, a `cdylib` whose one line is `cashgear_engine::android_main!(platformer::run)`) and a Gradle project that builds it with cargo-ndk, bundles the assets with `cg_pack`, and packages a debug APK (arm64 and x86_64), a release APK and a release AAB for Google Play (adding armeabi-v7a). App id `com.cashgear.platformer`, "CashGear Platformer", Android 8.0 (API 26) and newer, targeting API 36, landscape, full screen, with an adaptive launcher icon. Release signing reads `keystore.properties` or `CG_ANDROID_*` environment variables; the README shows how to make a keystore.
+- `cashgear_engine::android_main!`: declares a game's Android entry point around the same `run` function its desktop `main` calls.
+- `com.cashgear.engine.CashGearActivity` (`crates/cg_platform/android/java`): the engine's `NativeActivity`. It hides the system bars (immersive mode), keeps the screen on, lays the window out under display cutouts and records their safe insets, counts back presses instead of closing the app (`OnBackInvokedCallback` on Android 13 and newer), keeps the intent's `args` extra as launch flags, and ends the process when it is destroyed, so every launch starts fresh.
+- `cg_platform::android`: `run` (called by the macro), `app` and `AndroidApp`. On Android, `AssetIo` reads the APK's assets through the asset manager, and uses `assets.cgpak` there as its bundle by itself (`io::BUNDLE_FILE`); `Storage` writes files in the app's private folder; logs and panics (with a backtrace) go to logcat under the `cashgear` tag; `Args` reads the intent's `args` extra (`adb shell am start ... --es args "--demo"`).
+- Android's back button and gesture arrive as `KeyCode::BrowserBack`, which `ui_back` is now bound to by default. The platformer pauses a level on it, goes back in menus, and quits from the title screen.
+- `Window::safe_area`, the part of the window no display cutout covers, and `Window::with_safe_insets` for tests. The renderer fits the camera's view inside it (`Camera2D::viewport_in`, `screen_space_in`, `CameraView::viewport_in`), so the bars cover notches; the UI, the fade and screen/world conversions follow.
+- `impl Termination for AppExit`: `fn main() -> AppExit { app.run() }` ends the process with the app's exit code.
+- `cargo check-android` and `cargo clippy-android` aliases, and the Android targets in `rust-toolchain.toml`.
+- CI: an `android` job runs `clippy-android`, builds the debug APK and the release AAB (signed when the repository has the `CG_ANDROID_*` secrets), reports their sizes and uploads them as the `platformer-android` artifact. GitHub Pages now also waits for it.
+- The `android-release` Cargo profile (LTO, one codegen unit, no debug info).
+
+### Changed
+
+- The platformer is a library (`platformer::run`) with a small `main.rs`, so the Android library can run it.
+- Every example's `main` and the platformer's return the app's `AppExit`, so a demo bot that fails now fails its CI step; before, the process exited with 0 either way.
+- The renderer drops the window surface in `LifecycleChanged` the moment the app is suspended, not in the next frame, which never comes on Android before the native window is gone.
+- `Window::fullscreen` is always true on Android, and `Window::can_fullscreen` false (games there are always full screen).
+- The platformer's rebinding prompt is cancelled by the back button as well as Escape.
+- New dependency: jni 0.22.4 (Android only; already in the tree through cpal). winit's `android-native-activity` feature on Android.
+
 ## Phase 10 — Web build
+
 
 ### Added
 

@@ -1,12 +1,14 @@
-//! Launch arguments that work the same on desktop and web.
+//! Launch arguments that work the same on desktop, web and Android.
 
 use core::str::FromStr;
 
 /// The app's launch arguments: the command line on desktop, the page's query string on the
-/// web.
+/// web, the launching intent's `args` extra on Android.
 ///
 /// On the web, `?frames=120&backend=gl&no-vsync` reads as
-/// `--frames=120 --backend=gl --no-vsync`, so examples take the same flags everywhere.
+/// `--frames=120 --backend=gl --no-vsync`, so examples take the same flags everywhere. On
+/// Android the extra is split at spaces:
+/// `adb shell am start -n <app id>/com.cashgear.engine.CashGearActivity --es args "--demo"`.
 ///
 /// ```
 /// use cg_platform::Args;
@@ -71,9 +73,17 @@ impl Args {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
 fn platform_args() -> Vec<String> {
     std::env::args().skip(1).collect()
+}
+
+#[cfg(target_os = "android")]
+fn platform_args() -> Vec<String> {
+    crate::android::launch_args()
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect()
 }
 
 #[cfg(target_arch = "wasm32")]

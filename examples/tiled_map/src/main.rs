@@ -137,7 +137,7 @@ impl Default for Scroll {
     }
 }
 
-fn main() {
+fn main() -> AppExit {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins {
         window: WindowConfig {
@@ -151,7 +151,7 @@ fn main() {
     if Args::from_env().flag("demo") {
         app.add_systems(Update, demo.run_if(in_state(GameState::Playing)));
     }
-    app.run();
+    app.run()
 }
 
 /// Everything but the engine's plugins, so the tests can build it without a window.

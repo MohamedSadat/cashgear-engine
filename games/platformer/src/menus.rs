@@ -526,7 +526,8 @@ fn spawn_settings(
         MenuAction::TouchMode,
     );
     commands.entity(touch).insert(Live::TouchMode);
-    // Not where the platform cannot do it (Safari on iPhone, Android until Phase 11).
+    // Not where the platform cannot do it (Safari on iPhone) or where games
+    // are always full screen (Android).
     if window.can_fullscreen() {
         let fullscreen = button(
             &mut commands,
@@ -882,9 +883,13 @@ fn on_slider(
 }
 
 /// Pause (Escape, P, the start button, the touch pause button) pauses and resumes; back
-/// (Escape, the east button) leaves menus.
+/// (Escape, the east button, Android's back button) leaves menus. Android's back button
+/// also pauses a level, and on the title screen closes the game, as Android apps do.
+#[allow(clippy::too_many_arguments)]
 fn back_and_pause(
     action_state: Res<ActionState>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut exit: MessageWriter<AppExit>,
     state: Res<State<Screen>>,
     mut next: ResMut<NextState<Screen>>,
     fade: Res<StateFade<Screen>>,
@@ -896,8 +901,16 @@ fn back_and_pause(
     }
     let back = action_state.just_pressed(actions::BACK);
     let pause = action_state.just_pressed("pause");
+    let back_button = keys.just_pressed(KeyCode::BrowserBack);
     match state.current() {
-        Screen::Playing if pause && session.finished.is_none() => next.push(Screen::Paused),
+        Screen::Playing if (pause || back_button) && session.finished.is_none() => {
+            next.push(Screen::Paused);
+        }
+        Screen::Title if back_button && Target::CURRENT.can_quit() => {
+            info!("back on the title screen: quitting");
+            exit.write(AppExit::Success);
+        }
+
         Screen::Paused if back || pause => next.pop(),
         Screen::Levels | Screen::Settings | Screen::Controls if back => next.pop(),
         _ => {}

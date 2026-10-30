@@ -132,7 +132,7 @@ struct Status {
     show_debug: bool,
 }
 
-fn main() {
+fn main() -> AppExit {
     let args = Args::from_env();
     App::new()
         .add_plugins(DefaultPlugins {
@@ -161,7 +161,7 @@ fn main() {
             Update,
             (add_and_remove, camera_and_debug, draw, report).chain(),
         )
-        .run();
+        .run()
 }
 
 fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut bunnies: ResMut<Bunnies>) {

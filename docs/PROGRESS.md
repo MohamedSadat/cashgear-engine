@@ -17,7 +17,7 @@ This file tracks phase status, the decisions made at the start of each phase, kn
 | 8 | Text and UI | Done | `phase-8` |
 | 9 | Platformer sample game | Done | `phase-9` |
 | 10 | Web build | Done | `phase-10` |
-| 11 | Android build | Next | |
+| 11 | Android build | In progress (device test left) | |
 | 12 | Lua scripting | Not started | |
 | 13 | Scene editor | Not started | |
 | 14 | Polish, performance and release | Not started | |
@@ -685,6 +685,79 @@ Other choices made during the phase:
 - Desktop: `cargo run -p platformer`, then F11 and Alt+Enter go fullscreen and back; Settings, Fullscreen too. Alt-tab away during a level: the pause menu opens.
 - A release build locally: `cd games/platformer && trunk build --release --no-default-features`, then serve `dist/` with any static server. If trunk times out downloading wasm-opt, install binaryen so `wasm-opt` is on the PATH; trunk uses that one.
 
+## Phase 11 — Android build
+
+### Decisions
+
+| Question | Answer |
+| --- | --- |
+| Build tool | cargo-ndk and a Gradle project (Android Gradle plugin 9.5) in `games/platformer/android`. `cargo-apk` is deprecated and `xbuild` unmaintained; Gradle is what Google Play and Android Studio expect, and it makes the AAB. |
+| Lowest Android version | Android 8.0 (API 26), where cpal's AAudio output starts. Targets Android 16 (API 36). |
+| App id and name | `com.cashgear.platformer`, "CashGear Platformer". |
+| Where it is tested | The user's phone over USB, and an Android 16 emulator (`cashgear_api36`, x86_64), which needs the emulator's hypervisor driver on this machine. |
+
+Chosen without asking (said with the questions):
+
+- **Release signing.** The keystore is yours and never in the repository. Gradle reads it from `keystore.properties` (ignored by git) or the `CG_ANDROID_*` environment variables; without either, release builds come out unsigned. CI signs the AAB only when the repository has the secrets. Debug builds use the SDK's debug key.
+- **The APK carries the assets as one bundle**, `assets.cgpak`, as on the web.
+- **Back** is `ui_back`: it pauses a level, goes back in menus, and quits from the title screen.
+- **Landscape and always full screen** (immersive). The Fullscreen setting is hidden on Android.
+- **Gamepads on Android** go to the backlog.
+
+Other choices made during the phase:
+
+- **NativeActivity, not GameActivity.** winit supports both; GameActivity needs Google's games library (an AAR with AndroidX) at a version matching `android-activity`'s, while `NativeActivity` is part of Android. The engine's subclass, `com.cashgear.engine.CashGearActivity`, adds what it lacks: immersive mode (hidden again whenever the window regains focus), the screen kept on, the window laid out under display cutouts, back presses counted instead of closing the app, the intent's `args` extra, and ending the process in `onDestroy`.
+- **Java to Rust by polling.** The activity keeps three fields that `cg_platform::android` reads through JNI (jni 0.22): `backPresses` (a counter, so no press between two frames is lost), `safeInsets` (16 bits a side in one `long`) and `launchArgs`. The runner reads the first two once a frame. There are no native methods to register and no calls between threads.
+- **Back arrives in three ways and becomes one key.** The three-button bar's back key reaches the native input queue, and the runner maps Android's `KEYCODE_BACK` (which winit passes as an unidentified key) to `KeyCode::BrowserBack`. On Android 13 and newer the back gesture calls the activity's `OnBackInvokedCallback` (the manifest opts in with `enableOnBackInvokedCallback`); on older versions the gesture sends the key. The runner taps `BrowserBack` (pressed and released in one frame) for each counted press. winit reports every key as handled, so Android never closes the activity on its own.
+- **The surface.** Android destroys the native window as soon as the app is suspended, before another frame runs, so the renderer drops its surface in `LifecycleChanged` (`follow_suspend`) instead of at the next frame, and makes a new one on resume.
+- **One run per process.** winit can make one event loop per process, so a second activity in the same process could not run the game. `onDestroy` ends the process; every launch starts fresh, and the game's state lives in `Storage`.
+- **Display cutouts.** The window covers the whole screen (`LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS` from Android 11, `SHORT_EDGES` on 9 and 10). The cutout's safe insets become `Window::safe_area`, and the camera's view, the UI's screen space and the fade fit inside it; the rest is the letterbox colour. The hidden system bars' insets are not used.
+- **Assets.** Gradle stores `assets.cgpak` uncompressed in the APK (`noCompress`), so the asset manager hands it over as it is. The engine reads it whole into memory, as on the web, and `AssetIo` uses it as its bundle by itself; loose files in the APK's `assets/` are read through the asset manager.
+- **Saves** go to the app's private files folder (`internal_data_path`), under the game's namespace.
+- **Logs** go to logcat through `__android_log_write` (no logging crate), tag `cashgear`, one entry per line and at most 4000 bytes each. Panics are logged with a backtrace before the default hook runs.
+- **Gradle.** The Variant API registers two tasks per variant whose folders become the APK's native libraries and assets: `cargoNdk<Variant>` (cargo decides what to rebuild, so it always runs) and `bundleAssets<Variant>` (`cg_pack bundle`). The engine's Java folder is added to the app's sources. AGP 9 adds the Kotlin standard library to every app; excluding it took `classes.dex` from 2 MB to 119 KB. The Gradle 9.8.2 wrapper is in the repository.
+- **ABIs and profiles.** Debug APKs hold arm64-v8a (phones) and x86_64 (emulators), built with the `dev` profile; release builds add armeabi-v7a and use `[profile.android-release]` (LTO, one codegen unit, debug info stripped but symbols kept, so panic backtraces in logcat name functions). `-PcgAbis=arm64-v8a` builds fewer.
+- **16 KB pages.** NDK r28 and newer link with 16 KB alignment by default, which Google Play requires for apps targeting Android 15 and newer; the libraries' load segments are aligned to `0x4000`.
+- **`AppExit` as the exit code.** The platformer became a library so the Android library can call `platformer::run`; its `main.rs` and every example's `main` now return the `AppExit`, through a new `impl Termination for AppExit`. Before, `main` dropped it and the process exited with 0 even when a demo bot failed, so CI could not see a failing demo.
+- **The launcher icon** is an adaptive icon whose background layer is the web favicon's art, scaled up by whole numbers by a scratch script (not in the repository).
+- **Versions.** jni 0.22.4 (Android only, in the tree already through cpal), winit's `android-native-activity` feature, cargo-ndk 4.1.2, Gradle 9.8.2, Android Gradle plugin 9.5.0, NDK 29.0.14206865, JDK 17. Actions: `actions/setup-java@v6`.
+
+### Done
+
+- `cg_platform`: the `android` module (`run`, `app`, `AndroidApp`); on Android, assets read from the APK, `assets.cgpak` there as the bundle (`io::BUNDLE_FILE`), `Storage` in the app's files folder, logcat logging and the panic hook, `Args` from the intent's `args` extra, the back button as `KeyCode::BrowserBack`, and the safe insets; `Window::safe_area` and `with_safe_insets`; `Window::fullscreen` always true and `can_fullscreen` false on Android.
+- `crates/cg_platform/android/java`: `com.cashgear.engine.CashGearActivity`.
+- `cashgear_engine::android_main!`. `cg_core`: `impl Termination for AppExit`.
+- `cg_render`: `Camera2D::viewport_in`, `screen_space_in`, `CameraView::viewport_in`; the view, picking and `MainCamera::screen_space` keep to the safe area; the surface follows `LifecycleChanged`. `cg_anim`: the fade keeps to the safe area. `cg_ui`: `ui_back` is bound to `BrowserBack` too.
+- `games/platformer`: a library with a small `main.rs`; back pauses a level and quits from the title screen; back cancels a rebinding prompt. `games/platformer/android`: the `platformer_android` library, the Gradle project, the manifest, the launcher icon and a README.
+- The `android-release` profile, the Android targets in `rust-toolchain.toml`, and the `check-android` and `clippy-android` aliases.
+- 421 tests (2 more than Phase 10): the view keeping to the safe area, and `android_main!`'s doc example.
+- CI: the `android` job (clippy for Android, the debug APK and the release AAB, their sizes, the `platformer-android` artifact). The Pages deploy waits for it too.
+
+### Verified
+
+- All tests pass; fmt, clippy (desktop, wasm and Android, aarch64) and rustdoc with warnings denied are clean.
+- All ten CI demos exit with success now that `main` returns the exit code.
+- The Gradle builds here, on Windows:
+
+  | Output | Size | Inside |
+  | --- | ---: | --- |
+  | Debug APK | 43.8 MB | arm64-v8a and x86_64 libraries (`dev` profile), `assets.cgpak` stored, `classes.dex` 119 KB |
+  | Release APK (unsigned) | 43.0 MB | arm64-v8a 14.1 MB, armeabi-v7a 10.1 MB, x86_64 15.9 MB |
+  | Release AAB | 41.4 MB | the same libraries, and their symbol metadata for Play |
+
+  The libraries' load segments are aligned to 16 KB. A release build from clean takes about 20 minutes here (three ABIs with LTO).
+- Not checked yet: anything on a device. The phone was not connected during the phase, and the emulator needs the hypervisor driver, which needs an administrator. The phone test (install, play, home and back, the back button, saves after a restart, the safe area, the frame rate, the sound) is the step left before the `phase-11` tag.
+
+### Manual checks for the user
+
+- Build and install from `games/platformer/android` (see its README): `gradlew.bat assembleDebug`, then `adb install -r app/build/outputs/apk/debug/app-debug.apk`; or install the debug APK from the CI run's `platformer-android` artifact. The launcher shows "CashGear Platformer".
+- On the phone: it opens in landscape with no status or navigation bar, and the view clears the camera cutout. Play a level with the touch controls. Press Home, wait, and come back: the pause menu is open and the music is paused; resume and play on. Turn the screen off and on: the same. Back pauses a level, goes back in menus, and closes the game from the title screen.
+- Change a setting (a volume, the language), close the game from the title and open it again: the setting is kept.
+- With music playing: plug or unplug headphones, and take a phone call; the music should go quiet for the call and come back after.
+- `adb logcat -s cashgear` shows the engine's log, and `adb shell am start -n com.cashgear.platformer/com.cashgear.engine.CashGearActivity --es args "--demo"` lets the bot play the whole game.
+- For Google Play: make an upload keystore with `keytool` (the README has the command), write `keystore.properties`, and run `gradlew.bat bundleRelease`. For CI to sign, add the secrets `CG_ANDROID_KEYSTORE_BASE64`, `CG_ANDROID_KEYSTORE_PASSWORD`, `CG_ANDROID_KEY_ALIAS` and `CG_ANDROID_KEY_PASSWORD` to the repository. Uploading to the Play Console is yours.
+- For the emulator on this machine: run `D:\Android\sdk\extras\google\Android_Emulator_Hypervisor_Driver\silent_install.bat` as an administrator once, then `emulator -avd cashgear_api36`.
+
 ## Known issues
 
 - On the web, `AppExit` stops the loop but leaves the page; there is nowhere to exit to.
@@ -730,7 +803,7 @@ Other choices made during the phase:
 - `Audio::is_playing` knows only voices started with `play`; music and emitters are the engine's (use `Audio::music`). An emitter skipped by the voice caps is not retried until its component changes.
 - `AudioEmitter` is not a prefab component yet; the example turns Tiled objects into emitters in game code.
 - Whether a sound is streamed depends only on its length (`stream_longer_than`); there are no per-file loader settings.
-- `Storage` is synchronous and meant for small values; on Android it stores nothing until Phase 11.
+- `Storage` is synchronous and meant for small values.
 
 - UI nodes are not clipped: children and text that overflow a node draw outside it, and there are no scrolling panels.
 - Hidden nodes keep their space in the layout; there is no "display: none". Despawn or move a node to take it out.
@@ -757,6 +830,13 @@ Other choices made during the phase:
 - Web fullscreen works only shortly after a key press, click or touch; a game that calls `Window::set_fullscreen` from a timer is refused, and `Window::fullscreen` turns false again. Safari on iPhone has no fullscreen for pages (`can_fullscreen` is false); "Add to Home Screen" is the way there. Landscape lock works only in fullscreen and only where the browser allows it (Android).
 - The rotate notice and the page's loading and error texts are in English (the notice also in Arabic); the page does not know the game's language.
 - On desktop, the platformer pauses whenever its window loses focus during a level, even for a moment.
+
+- Android has no gamepads yet: winit's Android backend and gilrs do not read them. Touch controls only.
+- The game runs once per process: the activity ends the process when Android destroys it (the game quit from the title, the task swiped away), so nothing in memory survives that; the platformer keeps its saves in `Storage`. A launch while the game runs (`singleTask`) brings it forward, and a new intent's `args` extra is ignored.
+- Only display cutouts are kept clear; rounded screen corners can clip the corners of the HUD a little.
+- Release libraries keep their symbol tables, for readable backtraces in logcat; stripping them would make the APK smaller (not measured). A release build of the three ABIs takes about 20 minutes from clean.
+- Without a keystore, release builds (and CI's AAB without the secrets) are unsigned; Google Play takes only signed ones.
+- There is no soft keyboard (nothing in the engine takes typed text yet).
 
 ## Notes for later phases
 
@@ -801,6 +881,10 @@ Other choices made during the phase:
 - **Phase 12:** keep `cg_script` out of the web build (the `script` feature); the web release's size budget is 8 MB.
 - **Phase 14:** a content-hashed bundle name (trunk hashes the code but copies the bundle as is), a service worker for offline play, and per-level bundles (or music outside the bundle, streamed) if the download grows. Measure the web build's frame time with many sprites (bunnymark's release page now uses the web profile). The CI size table is the place to watch.
 
+- **Phase 12:** check that `mlua` with vendored Lua builds for Android through cargo-ndk (it compiles C with the NDK's clang); Luau is C++ and needs the NDK's C++ library linked. Keep `cg_script` behind the `script` feature so `clippy-android` and the APK build stay green until it does.
+- **Phase 13:** the editor is desktop only; `check-android` and `clippy-android` leave out `cg_editor` and `cg_pack`.
+- **Phase 14:** for a Play release: the version code from the tag, a signed AAB from CI, symbols stripped from the libraries and uploaded to Play instead (the AAB already carries the metadata), a foreground layer for the launcher icon, and the frame rate and battery on a mid-range phone. The `cargo generate` template can include `games/platformer/android`.
+
 ## Backlog
 
 Features that came up but don't serve the platformer or a listed example go here.
@@ -829,3 +913,4 @@ Features that came up but don't serve the platformer or a listed example go here
 - `QueryFilter` excluding several entities.
 - Platformer extras: more levels, a double jump or dash, collectible gems, enemies that throw things, a level timer leaderboard.
 - Web: uploading to itch.io from CI with butler (needs an API key secret), a service worker for offline play, content-hashed bundle names, the page following the game's language, and cpal's AudioWorklet output (needs cross-origin isolation headers, which GitHub Pages cannot set).
+- Android: gamepads, a soft keyboard for text fields, GameActivity, Android TV and ChromeOS, keeping clear of rounded screen corners, and Play Asset Delivery if the bundle grows.

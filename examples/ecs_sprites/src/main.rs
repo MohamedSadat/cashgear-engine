@@ -145,7 +145,7 @@ impl Rng {
     }
 }
 
-fn main() {
+fn main() -> AppExit {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins {
         window: WindowConfig {
@@ -159,7 +159,7 @@ fn main() {
     if Args::from_env().flag("demo") {
         app.add_systems(Update, demo);
     }
-    app.run();
+    app.run()
 }
 
 /// The `--demo` script: frame numbers within each 480-frame cycle and the state change made

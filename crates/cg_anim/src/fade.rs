@@ -132,7 +132,8 @@ pub(crate) fn queue_fade(
     let space = view
         .0
         .camera
-        .screen_space(size, window.scale_factor() as f32);
+        .screen_space_in(window.safe_area(), window.scale_factor() as f32);
+
     // A little larger than the window, so rounding never shows an edge.
     let rect = space.target_rect(size);
     let rect = cg_core::Rect::from_corners(rect.min - Vec2::ONE, rect.max + Vec2::ONE);

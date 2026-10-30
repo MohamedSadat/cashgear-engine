@@ -7,7 +7,9 @@ use crate::overlay::{OverlayFrame, RenderOverlays};
 use crate::{CameraView, Color, DebugShapes, Filter, Image, QueuedSprite, ScalingMode};
 use bytemuck::{Pod, Zeroable};
 use cg_assets::{AssetId, Assets};
+use cg_core::Rect;
 use cg_core::glam::{Mat4, UVec2, Vec2, Vec3};
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -27,6 +29,9 @@ pub(crate) struct FrameInput<'a> {
     pub(crate) shapes: &'a DebugShapes,
     /// Physical pixels per logical pixel.
     pub(crate) scale_factor: f32,
+    /// The part of the target the view keeps to, in physical pixels: the window's safe
+    /// area, or the whole target.
+    pub(crate) area: Rect,
 }
 
 /// What one frame drew.
@@ -394,7 +399,7 @@ impl Painter {
         overlays: Option<&mut RenderOverlays>,
     ) -> FrameStats {
         let camera = &input.view.camera;
-        let viewport = input.view.viewport(target_size, input.scale_factor);
+        let viewport = input.view.viewport_in(input.area, input.scale_factor);
         let rect = viewport.rect;
         let has_view = !rect.is_empty();
         let pixel_perfect = matches!(camera.scaling, ScalingMode::PixelPerfect(_));
@@ -633,7 +638,7 @@ fn screen_projection(input: &FrameInput<'_>, target_size: UVec2) -> Mat4 {
     let space = input
         .view
         .camera
-        .screen_space(target_size, input.scale_factor);
+        .screen_space_in(input.area, input.scale_factor);
     let target = target_size.as_vec2().max(Vec2::ONE);
     let scale = 2.0 * space.scale / target;
     let offset = 2.0 * space.origin / target - 1.0;

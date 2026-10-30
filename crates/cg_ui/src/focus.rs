@@ -13,8 +13,8 @@ use cg_platform::input::{
 
 /// The UI's actions, which [`UiPlugin`](crate::UiPlugin) binds by default (unless the
 /// game's [`ActionMap`] already has them): arrows and WASD, the d-pad and left stick
-/// move the focus; Enter, Space and the gamepad's south button press; Escape and the east
-/// button go back.
+/// move the focus; Enter, Space and the gamepad's south button press; Escape, the east
+/// button and Android's back button ([`KeyCode::BrowserBack`]) go back.
 pub mod actions {
     /// Moves the focus up.
     pub const UP: &str = "ui_up";
@@ -81,7 +81,11 @@ pub(crate) fn bind_ui_actions(map: &mut ActionMap) {
         ),
         (
             actions::BACK,
-            vec![KeyCode::Escape.into(), GamepadButton::East.into()],
+            vec![
+                KeyCode::Escape.into(),
+                KeyCode::BrowserBack.into(),
+                GamepadButton::East.into(),
+            ],
         ),
     ];
     for (action, bindings) in defaults {

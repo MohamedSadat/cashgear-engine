@@ -1,5 +1,7 @@
 # Keep LF everywhere so rustfmt agrees on Windows and Linux.
 * text=auto eol=lf
+# Windows batch files (Gradle's gradlew.bat) need CRLF to run reliably.
+*.bat text eol=crlf
 
 *.png binary
 *.jpg binary
@@ -8,3 +10,4 @@
 *.ttf binary
 *.otf binary
 *.wasm binary
+*.jar binary

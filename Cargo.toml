@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "examples/*", "games/*", "tools/*"]
+# `games/platformer/android` is the platformer's Android entry point (a cdylib).
+members = ["crates/*", "examples/*", "games/*", "games/platformer/android", "tools/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -43,6 +44,9 @@ gilrs = "0.11.2"
 glam = "0.34.1"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 js-sys = "0.3.106"
+# Android: reading the state the engine's Java activity keeps (back presses, the safe
+# area). The version cpal already uses there.
+jni = "0.22.4"
 # Audio device, mixing and buses only: sounds are decoded by symphonia directly.
 kira = { version = "0.12.6", default-features = false, features = ["cpal"] }
 log = "0.4.34"
@@ -89,3 +93,11 @@ inherits = "release"
 opt-level = "z"
 lto = true
 codegen-units = 1
+
+# Android releases (the Gradle build's release variant): full speed, LTO, and no debug
+# info in the library the APK carries. Function names stay, so panics in logcat read.
+[profile.android-release]
+inherits = "release"
+lto = true
+codegen-units = 1
+strip = "debuginfo"

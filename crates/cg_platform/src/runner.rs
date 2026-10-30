@@ -5,7 +5,8 @@
 //! an optional `max_fps` cap, and a 60 fps cap while the window is hidden, wait with
 //! `ControlFlow::WaitUntil` between frames instead. Web: `spawn_app` hands the loop to the
 //! browser and returns at once; `request_redraw` maps to `requestAnimationFrame`, which
-//! paces the frames.
+//! paces the frames. Android: `run_app` blocks on `android_main`'s thread as on desktop;
+//! the window's surface goes away while the app is in the background (`Suspended`).
 
 // The runner is the one place that reads the clock. `web_time::Instant` is the browser's
 // `performance.now()` on the web and `std::time::Instant` on desktop.
@@ -32,7 +33,7 @@ const IDLE_FPS: f64 = 60.0;
 
 /// Runs `app` in a window until it exits.
 pub(crate) fn run(app: App, config: WindowConfig) -> AppExit {
-    let event_loop = match EventLoop::new() {
+    let event_loop = match new_event_loop() {
         Ok(event_loop) => event_loop,
         Err(err) => {
             log::error!("cannot start the event loop: {err}");
@@ -40,6 +41,24 @@ pub(crate) fn run(app: App, config: WindowConfig) -> AppExit {
         }
     };
     run_event_loop(event_loop, Runner::new(app, config))
+}
+
+#[cfg(not(target_os = "android"))]
+fn new_event_loop() -> Result<EventLoop<()>, String> {
+    EventLoop::new().map_err(|err| err.to_string())
+}
+
+/// winit drives the activity that `android_main!` handed over.
+#[cfg(target_os = "android")]
+fn new_event_loop() -> Result<EventLoop<()>, String> {
+    use winit::platform::android::EventLoopBuilderExtAndroid;
+
+    let app = crate::android::app()
+        .ok_or("no Android app: start the game with `cashgear_engine::android_main!`")?;
+    EventLoop::builder()
+        .with_android_app(app.clone())
+        .build()
+        .map_err(|err| err.to_string())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -139,6 +158,7 @@ impl Runner {
             self.user_activated();
         }
         self.sync_fullscreen();
+        self.poll_platform();
         let now = Instant::now();
         let delta = self
             .last_frame
@@ -172,11 +192,41 @@ impl Runner {
         let Some(window) = &self.window else {
             return;
         };
-        let fullscreen = window.fullscreen().is_some();
+        let fullscreen = platform_fullscreen(window);
         if self.app.world().resource::<Window>().fullscreen != fullscreen {
             self.window_mut().fullscreen = fullscreen;
         }
     }
+
+    /// Android: presses of the back button or gesture and the display cutout's safe area,
+    /// as recorded by the engine's activity.
+    #[cfg(target_os = "android")]
+    fn poll_platform(&mut self) {
+        let Some(state) = crate::android::activity_state() else {
+            return;
+        };
+        if state.back_presses > 0
+            && let Some(mut keys) = self
+                .app
+                .world_mut()
+                .get_resource_mut::<ButtonInput<KeyCode>>()
+        {
+            // A tap: just pressed and just released in this frame.
+            keys.press(KeyCode::BrowserBack);
+            keys.release(KeyCode::BrowserBack);
+        }
+        if self.app.world().resource::<Window>().safe_insets != state.safe_insets {
+            let [left, top, right, bottom] = state.safe_insets;
+            log::info!(
+                "safe area insets (physical pixels): left {left}, top {top}, right {right}, \
+                 bottom {bottom}"
+            );
+            self.window_mut().safe_insets = state.safe_insets;
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn poll_platform(&mut self) {}
 
     fn set_fullscreen(&mut self, fullscreen: bool) {
         let Some(window) = &self.window else {
@@ -255,7 +305,7 @@ impl Runner {
                 {
                     typed.push(text);
                 }
-                let PhysicalKey::Code(key) = event.physical_key else {
+                let Some(key) = platform_key(event.physical_key) else {
                     return;
                 };
                 if self.fullscreen_key(key, event.state, event.repeat) {
@@ -364,7 +414,7 @@ impl ApplicationHandler for Runner {
             state.user_activated = !cfg!(target_arch = "wasm32");
             state.touch_screen = platform_touch_screen();
             state.can_fullscreen = platform_can_fullscreen();
-            state.fullscreen = window.fullscreen().is_some();
+            state.fullscreen = platform_fullscreen(&window);
             self.app
                 .world_mut()
                 .insert_resource(WindowHandle(window.clone()));
@@ -524,10 +574,30 @@ fn platform_touch_screen() -> bool {
 #[cfg(not(target_arch = "wasm32"))]
 fn platform_resized(_window: &WinitWindow, _size: UVec2) {}
 
-/// Desktop windows can always go fullscreen; Android's immersive mode is Phase 11's.
+/// Desktop windows can always go fullscreen; Android games always are (immersive mode),
+/// so there is nothing to switch.
 #[cfg(not(target_arch = "wasm32"))]
 fn platform_can_fullscreen() -> bool {
     !cfg!(target_os = "android")
+}
+
+/// Whether the window fills the screen. Android games always do: `CashGearActivity`
+/// hides the system bars.
+fn platform_fullscreen(window: &WinitWindow) -> bool {
+    cfg!(target_os = "android") || window.fullscreen().is_some()
+}
+
+/// The engine's key for a winit key, if it has one. On Android the back button (and the
+/// back gesture, when the system sends it as a key) becomes [`KeyCode::BrowserBack`].
+fn platform_key(key: PhysicalKey) -> Option<KeyCode> {
+    match key {
+        PhysicalKey::Code(code) => Some(code),
+        #[cfg(target_os = "android")]
+        PhysicalKey::Unidentified(winit::keyboard::NativeKeyCode::Android(
+            crate::android::KEYCODE_BACK,
+        )) => Some(KeyCode::BrowserBack),
+        PhysicalKey::Unidentified(_) => None,
+    }
 }
 
 /// `document.fullscreenEnabled` (or Safari's prefixed one): false on iPhone, where only

@@ -129,22 +129,31 @@ impl Camera2D {
     /// The viewport for a render target of `target_size` physical pixels with the given
     /// scale factor (physical pixels per logical pixel).
     pub fn viewport(&self, target_size: UVec2, scale_factor: f32) -> Viewport {
-        let target = target_size.as_vec2();
+        self.viewport_in(whole(target_size), scale_factor)
+    }
+
+    /// The viewport when the view must stay inside `area`, in physical pixels from the
+    /// target's top-left: a window's [`safe_area`](Window::safe_area), clear of display
+    /// cutouts. The view is fitted to `area` as [`viewport`](Self::viewport) fits it to a
+    /// whole target, and the rest of the target is bars.
+    pub fn viewport_in(&self, area: Rect, scale_factor: f32) -> Viewport {
+        let area = Rect::from_corners(area.min.round(), area.max.round());
+        let target = area.size();
+        let target_size = target.as_uvec2();
         let zoom = self.zoom.max(MIN_ZOOM);
-        let full = Rect::from_min_size(Vec2::ZERO, target);
         let fitted = |virtual_size: UVec2, scale: f32| {
             let size = (virtual_size.as_vec2() * scale).floor();
-            let min = ((target - size) * 0.5).floor();
+            let min = area.min + ((target - size) * 0.5).floor();
             Rect::from_min_size(min, size)
         };
         match self.scaling {
             ScalingMode::WindowSize => Viewport {
-                rect: full,
+                rect: area,
                 render_size: target_size,
                 world_size: target / scale_factor.max(f32::EPSILON) / zoom,
             },
             ScalingMode::Stretch(size) => Viewport {
-                rect: full,
+                rect: area,
                 render_size: target_size,
                 world_size: size.max(UVec2::ONE).as_vec2() / zoom,
             },
@@ -241,15 +250,26 @@ impl ScreenSpace {
     }
 }
 
+/// A whole render target as a rectangle in its physical pixels.
+fn whole(target_size: UVec2) -> Rect {
+    Rect::from_min_size(Vec2::ZERO, target_size.as_vec2())
+}
+
 impl Camera2D {
     /// The UI's space in a render target of `target_size` physical pixels with the given
     /// scale factor; see [`ScreenSpace`].
     pub fn screen_space(&self, target_size: UVec2, scale_factor: f32) -> ScreenSpace {
+        self.screen_space_in(whole(target_size), scale_factor)
+    }
+
+    /// The UI's space when the view must stay inside `area` (see
+    /// [`viewport_in`](Self::viewport_in)).
+    pub fn screen_space_in(&self, area: Rect, scale_factor: f32) -> ScreenSpace {
         let unzoomed = Self {
             zoom: 1.0,
             ..self.clone()
         };
-        let viewport = unzoomed.viewport(target_size, scale_factor);
+        let viewport = unzoomed.viewport_in(area, scale_factor);
         let rect = viewport.rect;
         let (size, scale) = match self.scaling {
             ScalingMode::WindowSize => {
@@ -323,6 +343,11 @@ impl CameraView {
         self.camera.viewport(target_size, scale_factor)
     }
 
+    /// The viewport inside part of a render target; see [`Camera2D::viewport_in`].
+    pub fn viewport_in(&self, area: Rect, scale_factor: f32) -> Viewport {
+        self.camera.viewport_in(area, scale_factor)
+    }
+
     /// The matrix from world coordinates to clip space for a view spanning `world_size`
     /// world units (see [`Viewport::world_size`]).
     pub fn view_projection(&self, world_size: Vec2) -> Mat4 {
@@ -339,25 +364,30 @@ impl CameraView {
     /// The screen position (logical pixels from the window's top-left) of a world point.
     pub fn world_to_screen(&self, world: Vec2, window: &Window) -> Vec2 {
         let scale_factor = window.scale_factor() as f32;
-        self.world_to_target(world, window.physical_size(), scale_factor) / scale_factor
+        self.world_to_target(world, window.safe_area(), scale_factor) / scale_factor
     }
 
     /// The world point under a screen position (logical pixels from the window's top-left).
     /// Positions over the bars map to points outside the view.
     pub fn screen_to_world(&self, screen: Vec2, window: &Window) -> Vec2 {
         let scale_factor = window.scale_factor() as f32;
-        self.target_to_world(screen * scale_factor, window.physical_size(), scale_factor)
+        self.target_to_world(screen * scale_factor, window.safe_area(), scale_factor)
     }
 
     /// The world-space bounding box of what the camera shows in `window`. With rotation it
     /// is the box around the turned view.
     pub fn visible_rect(&self, window: &Window) -> Rect {
-        self.visible_rect_in(window.physical_size(), window.scale_factor() as f32)
+        self.visible_rect_within(window.safe_area(), window.scale_factor() as f32)
     }
 
     /// The world-space bounding box of what the camera shows in a render target.
     pub fn visible_rect_in(&self, target_size: UVec2, scale_factor: f32) -> Rect {
-        let viewport = self.viewport(target_size, scale_factor);
+        self.visible_rect_within(whole(target_size), scale_factor)
+    }
+
+    /// The world-space bounding box of what the camera shows inside `area` of a target.
+    fn visible_rect_within(&self, area: Rect, scale_factor: f32) -> Rect {
+        let viewport = self.viewport_in(area, scale_factor);
         let half = viewport.world_size * 0.5;
         let (sin, cos) = self.rotation.sin_cos();
         let extent = Vec2::new(
@@ -367,9 +397,9 @@ impl CameraView {
         Rect::from_center_size(self.position, extent * 2.0)
     }
 
-    /// A world point in physical pixels of a target of `target_size`.
-    pub(crate) fn world_to_target(&self, world: Vec2, target_size: UVec2, scale: f32) -> Vec2 {
-        let viewport = self.viewport(target_size, scale);
+    /// A world point in physical pixels of a target, with the view inside `area`.
+    pub(crate) fn world_to_target(&self, world: Vec2, area: Rect, scale: f32) -> Vec2 {
+        let viewport = self.viewport_in(area, scale);
         let ndc = self
             .view_projection(viewport.world_size)
             .project_point3(world.extend(0.0))
@@ -377,9 +407,9 @@ impl CameraView {
         viewport.rect.min + (ndc * Vec2::new(0.5, -0.5) + 0.5) * viewport.rect.size()
     }
 
-    /// The world point at physical pixel `pixel` of a target of `target_size`.
-    pub(crate) fn target_to_world(&self, pixel: Vec2, target_size: UVec2, scale: f32) -> Vec2 {
-        let viewport = self.viewport(target_size, scale);
+    /// The world point at physical pixel `pixel` of a target, with the view inside `area`.
+    pub(crate) fn target_to_world(&self, pixel: Vec2, area: Rect, scale: f32) -> Vec2 {
+        let viewport = self.viewport_in(area, scale);
         let size = viewport.rect.size().max(Vec2::ONE);
         let ndc = ((pixel - viewport.rect.min) / size - 0.5) * Vec2::new(2.0, -2.0);
         self.view_projection(viewport.world_size)
@@ -464,12 +494,12 @@ impl MainCamera<'_, '_> {
         self.view().visible_rect(&self.window)
     }
 
-    /// The UI's space in the window; see [`ScreenSpace`].
+    /// The UI's space in the window; see [`ScreenSpace`]. It keeps to the window's
+    /// [`safe_area`](Window::safe_area), as the view does.
     pub fn screen_space(&self) -> ScreenSpace {
-        self.view().camera.screen_space(
-            self.window.physical_size(),
-            self.window.scale_factor() as f32,
-        )
+        self.view()
+            .camera
+            .screen_space_in(self.window.safe_area(), self.window.scale_factor() as f32)
     }
 }
 
@@ -569,7 +599,7 @@ mod tests {
         view.position = vec2(50.0, -20.0);
         view.camera.zoom = 1.5;
         view.rotation = 0.3;
-        let target = uvec2(1000, 700);
+        let target = whole(uvec2(1000, 700));
         for point in [vec2(0.0, 0.0), vec2(55.0, -10.0), vec2(-100.0, 80.0)] {
             let pixel = view.world_to_target(point, target, 1.0);
             let back = view.target_to_world(pixel, target, 1.0);
@@ -580,7 +610,7 @@ mod tests {
     #[test]
     fn screen_is_y_down_from_the_top_left() {
         let view = view(ScalingMode::PixelPerfect(uvec2(640, 360)));
-        let target = uvec2(1280, 720);
+        let target = whole(uvec2(1280, 720));
         // The camera centre is the screen centre; up in the world is up on screen.
         assert_eq!(
             view.world_to_target(Vec2::ZERO, target, 1.0),
@@ -594,6 +624,41 @@ mod tests {
             view.target_to_world(vec2(1280.0, 720.0), target, 1.0),
             vec2(320.0, -180.0)
         );
+    }
+
+    #[test]
+    fn the_view_keeps_to_the_safe_area() {
+        // A 2400x1080 phone in landscape with a 120-pixel cutout on the left.
+        let window = Window::with_size(uvec2(2400, 1080), 1.0).with_safe_insets(120, 0, 0, 0);
+        let area = window.safe_area();
+        assert_eq!(area, Rect::new(120.0, 0.0, 2400.0, 1080.0));
+
+        // Pixel-perfect: still three times, centred in the safe part.
+        let pixel = Camera2D::default().viewport_in(area, 1.0);
+        assert_eq!(pixel.rect, Rect::new(300.0, 0.0, 2220.0, 1080.0));
+        // The whole window would have centred it at 240.
+        let whole_window = Camera2D::default().viewport(uvec2(2400, 1080), 1.0);
+        assert_eq!(whole_window.rect.min, vec2(240.0, 0.0));
+
+        // Window-sized views shrink to the safe area, and so does the UI.
+        let camera = Camera2D {
+            scaling: ScalingMode::WindowSize,
+            ..Camera2D::default()
+        };
+        let viewport = camera.viewport_in(area, 2.0);
+        assert_eq!(viewport.rect, area);
+        assert_eq!(viewport.world_size, vec2(1140.0, 540.0));
+        let space = camera.screen_space_in(area, 2.0);
+        assert_eq!(
+            (space.origin, space.size),
+            (vec2(120.0, 0.0), vec2(1140.0, 540.0))
+        );
+
+        // Screen conversions go through the same view.
+        let view = CameraView::new(Camera2D::default());
+        let centre = view.world_to_screen(Vec2::ZERO, &window);
+        assert_eq!(centre, vec2(1260.0, 540.0));
+        assert!(view.screen_to_world(centre, &window).length() < 1e-3);
     }
 
     #[test]

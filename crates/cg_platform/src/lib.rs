@@ -13,13 +13,19 @@
 //! [`tasks::spawn_local`] runs async work (such as GPU setup) without threads, [`Args`]
 //! reads launch flags from the command line or the page URL, and [`Target`] says which kind
 //! of platform the game was built for. [`io::AssetIo`] reads game files from disk, over
-//! `fetch` or (from Phase 11) from the APK, and [`io::FileWatcher`] reports changed files
-//! on desktop for hot reloading. [`storage::Storage`] keeps small text values such as
-//! settings between runs: in files on desktop, in `localStorage` on the web;
+//! `fetch` or from the APK, and [`io::FileWatcher`] reports changed files on desktop for
+//! hot reloading. [`storage::Storage`] keeps small text values such as settings between
+//! runs: in files on desktop and Android, in `localStorage` on the web;
 //! [`StoragePlugin`](storage::StoragePlugin) inserts it. [`page`] sends events to the web
 //! page around the game (the first frame is drawn, the game failed), and
-//! [`io::Bundle`] packs a whole asset folder into one file for the web.
+//! [`io::Bundle`] packs a whole asset folder into one file for the web and Android.
+//!
+//! On Android the `android` module (built for Android only) takes the app from the
+//! entry point (`cashgear_engine::android_main!`) and reads what the engine's Java
+//! activity, `CashGearActivity`, records: back presses and the display cutout's safe area.
 
+#[cfg(target_os = "android")]
+pub mod android;
 mod args;
 pub mod input;
 pub mod io;

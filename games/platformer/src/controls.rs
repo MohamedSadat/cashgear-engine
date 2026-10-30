@@ -168,9 +168,9 @@ fn cool_down(mut rebinding: ResMut<Rebinding>, mut focus: ResMut<UiFocus>) {
     }
 }
 
-/// While a prompt is open: Escape cancels it (so Escape cannot be bound by the prompt;
-/// "Reset" brings it back for pausing); the first other key (for a key slot) or gamepad
-/// button (for the pad slot) pressed after it opened is bound.
+/// While a prompt is open: Escape or Android's back button cancels it (so neither can be
+/// bound by the prompt; "Reset" brings Escape back for pausing); the first other key (for
+/// a key slot) or gamepad button (for the pad slot) pressed after it opened is bound.
 fn capture(
     keys: Res<ButtonInput<KeyCode>>,
     gamepads: Res<Gamepads>,
@@ -187,8 +187,9 @@ fn capture(
         rebinding.armed = true;
         return;
     }
-    if keys.just_pressed(KeyCode::Escape) {
+    if keys.any_just_pressed([KeyCode::Escape, KeyCode::BrowserBack]) {
         info!("rebinding cancelled");
+
         rebinding.last = None;
         rebinding.finish();
         return;

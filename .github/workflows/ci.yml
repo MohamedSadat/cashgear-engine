@@ -147,11 +147,77 @@ jobs:
         with:
           path: games/platformer/dist/
 
+  android:
+    name: android build
+    runs-on: ubuntu-latest
+    env:
+      # Release signing, if the repository has the secrets (see
+      # games/platformer/android/README.md); without them the AAB is unsigned.
+      HAS_KEYSTORE: ${{ secrets.CG_ANDROID_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux packages
+        # The asset bundle is made by cg_pack, which builds the engine natively: libudev for
+        # gilrs, ALSA headers for cpal.
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev
+      # Installs the Android targets listed in rust-toolchain.toml.
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk@4.1.2
+      - name: Android SDK packages
+        # The runner has the SDK; these are the versions the Gradle build names.
+        run: >-
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" > /dev/null
+      - name: clippy (Android)
+        run: cargo clippy-android
+      - name: release keystore
+        if: env.HAS_KEYSTORE == 'true'
+        env:
+          KEYSTORE: ${{ secrets.CG_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "CG_ANDROID_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+      - name: build the APK and the AAB
+        # A debug APK (arm64 and x86_64) to install by hand or on an emulator, and the
+        # release AAB (arm64, armeabi-v7a and x86_64) for Google Play.
+        working-directory: games/platformer/android
+        env:
+          CG_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.CG_ANDROID_KEYSTORE_PASSWORD }}
+          CG_ANDROID_KEY_ALIAS: ${{ secrets.CG_ANDROID_KEY_ALIAS }}
+          CG_ANDROID_KEY_PASSWORD: ${{ secrets.CG_ANDROID_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon assembleDebug bundleRelease
+      - name: sizes
+        shell: bash
+        working-directory: games/platformer/android/app/build/outputs
+        run: |
+          {
+            echo "### Android build sizes"
+            echo
+            echo "| File | Bytes |"
+            echo "| --- | ---: |"
+            find . -name '*.apk' -o -name '*.aab' | sort | while IFS= read -r file; do
+              echo "| \`${file#./}\` | $(stat -c %s "$file") |"
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: platformer-android
+          path: |
+            games/platformer/android/app/build/outputs/apk/debug/*.apk
+            games/platformer/android/app/build/outputs/bundle/release/*.aab
+
   pages:
     name: deploy to GitHub Pages
     # Only a green main is published.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [fmt, check, web]
+    needs: [fmt, check, web, android]
+
     runs-on: ubuntu-latest
     permissions:
       pages: write

@@ -100,11 +100,27 @@ impl WindowRenderer {
     }
 
     fn suspend(&mut self) {
+        if !self.suspended {
+            log::info!("suspended: dropping the window surface");
+        }
         self.suspended = true;
         // The native window goes away on Android; the surface must go with it.
         if let State::Ready(gpu) = &mut self.state {
             gpu.surface = None;
         }
+    }
+}
+
+/// Drops the surface the moment the app is suspended and allows drawing again when it
+/// resumes, in [`LifecycleChanged`](cg_platform::LifecycleChanged). On Android the native
+/// window is destroyed right after the runner's suspend callback returns, so waiting for
+/// the next frame's [`Lifecycle`] message would draw to a window that is gone.
+pub(crate) fn follow_suspend(mut renderer: ResMut<WindowRenderer>, window: Res<Window>) {
+    if window.suspended() {
+        renderer.suspend();
+    } else if renderer.suspended {
+        log::info!("resumed: the window surface is made again on the next frame");
+        renderer.suspended = false;
     }
 }
 
@@ -301,7 +317,9 @@ pub(crate) fn render(
                 screen_sprites: sprites.screen_queued(),
                 shapes: &shapes,
                 scale_factor: window.scale_factor() as f32,
+                area: window.safe_area(),
             };
+
             match renderer.gpu(&handle) {
                 Ok(Some(gpu)) => {
                     if stats.adapter.is_empty() {

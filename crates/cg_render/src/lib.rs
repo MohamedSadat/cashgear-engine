@@ -95,7 +95,7 @@ pub use wgpu;
 use bevy_ecs::schedule::IntoScheduleConfigs;
 use cg_assets::AppAssetExt;
 use cg_core::{App, Plugin, PostUpdate, Render};
-use cg_platform::{Args, Lifecycle, Window};
+use cg_platform::{Args, Lifecycle, LifecycleChanged, Window};
 use cg_world::{AppWorldExt, TransformSystems, WorldPlugin};
 
 /// Adds the renderer: the [`Image`] and [`TextureAtlas`] asset types with their loaders,
@@ -166,7 +166,11 @@ impl Plugin for RenderPlugin {
             .register_component::<Visibility>("Visibility")
             .register_component::<Camera2D>("Camera2D")
             .insert_resource(gpu::window::WindowRenderer::new(self.clone()))
+            // At once, not in the next frame: on Android the native window goes away as
+            // soon as the app is suspended, and no frame follows.
+            .add_systems(LifecycleChanged, gpu::window::follow_suspend)
             .add_systems(
+
                 PostUpdate,
                 (
                     atlas::apply_atlas_sprites,

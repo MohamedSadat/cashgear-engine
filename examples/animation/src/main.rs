@@ -159,7 +159,7 @@ struct Bot {
 #[derive(Resource, Default)]
 struct Zoom(bool);
 
-fn main() {
+fn main() -> AppExit {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins {
         window: WindowConfig {
@@ -172,7 +172,7 @@ fn main() {
     .add_plugins(Game {
         demo: Args::from_env().flag("demo"),
     });
-    app.run();
+    app.run()
 }
 
 /// Everything but the engine's plugins, so the tests can build it without a window.
