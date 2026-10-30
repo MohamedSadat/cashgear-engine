@@ -10,7 +10,7 @@ The app id is `com.cashgear.platformer`. It runs on Android 8.0 (API 26) and new
 ## What you need
 
 - Rust with the Android targets (`rust-toolchain.toml` lists them; rustup installs them on first use).
-- `cargo install cargo-ndk`
+- `cargo install cargo-ndk`. It also gives the NDK's C compiler to the Lua sources the game's scripts run on (`mlua` compiles Lua 5.4 into the library).
 - JDK 17 or newer (`JAVA_HOME`).
 - The Android SDK (`ANDROID_HOME`, or `sdk.dir` in `local.properties`) with `platforms;android-36`, `build-tools;36.0.0` and `ndk;29.0.14206865`. Android Studio installs these, or the command-line tools' `sdkmanager`.
 

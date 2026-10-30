@@ -2,6 +2,7 @@
 //! backdrop), and turning the map's objects into game objects by their class.
 
 use crate::progress::{MAX_HEARTS, Session};
+use crate::scripts::Scripts;
 use crate::{Art, Screen, enemies, player, things};
 use cashgear_engine::prelude::*;
 use cashgear_engine::tiled::ObjectShape;
@@ -202,6 +203,7 @@ fn tag_objects(
     players: Query<Entity, With<player::Player>>,
     camera: Single<Entity, With<Camera2D>>,
     bounds: Res<LevelBounds>,
+    scripts: Res<Scripts>,
     mut session: ResMut<Session>,
 ) {
     // A map that spawns (or respawns after a hot reload) starts the count again.
@@ -239,12 +241,13 @@ fn tag_objects(
                 session.coins_total += 1;
                 things::coin(&mut commands, entity, at);
             }
-            "Checkpoint" => things::checkpoint(&mut commands, entity),
+            // Scripted checkpoints are made by their prefab (see `scripts`).
+            "Checkpoint" if !scripts.on() => things::checkpoint(&mut commands, entity),
             "Spring" => things::spring(&mut commands, entity),
             "Exit" => things::exit(&mut commands, entity),
             "Platform" => things::platform(&mut commands, &art, entity, object, at),
             "Walker" | "Spiker" | "Hopper" | "Bat" => {
-                enemies::spawn(&mut commands, &art, entity, object, at);
+                enemies::spawn(&mut commands, &art, &scripts, entity, object, at);
             }
             "BotHint" => {
                 let size = match &object.shape {

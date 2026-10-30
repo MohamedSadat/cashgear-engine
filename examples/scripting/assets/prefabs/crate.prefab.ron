@@ -1,0 +1,12 @@
+// A crate the spawner drops: it falls, lands, and fades away after a while
+// (`scripts/crate.lua`).
+(
+    components: {
+        "Name": "crate",
+        "Sprite": (size: Some((14, 14)), color: "#b86f50", pivot: (0.5, 0)),
+        "KinematicBody": (max_fall_speed: 300),
+        "Collider": (shape: Rect((14, 14)), offset: (0, 7)),
+        "Layer": (7),
+        "Script": "scripts/crate.lua",
+    },
+)

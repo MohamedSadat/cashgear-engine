@@ -1,0 +1,19 @@
+// The player: a body that `scripts/player.lua` drives (keys, a gamepad, or in the demo a
+// bot written in Lua too), with the alien's picture as a child. The map's `Player` point
+// is where its feet start.
+(
+    components: {
+        "Name": "player",
+        "KinematicBody": (max_fall_speed: 480),
+        "Collider": (shape: Rect((12, 18)), offset: (0, 9)),
+        "Script": "scripts/player.lua",
+    },
+    children: [
+        (components: {
+            "Name": "picture",
+            "SpriteAnimation": (sheet: "images/alien.json", clip: "idle", pivot: (0.5, 0)),
+            "Animator": (graph: "anims/alien.anim.ron"),
+            "Layer": (10),
+        }),
+    ],
+)

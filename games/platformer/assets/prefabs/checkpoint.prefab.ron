@@ -1,0 +1,10 @@
+// A checkpoint flag where scripts run (desktop and Android): the map's `Checkpoint` tile
+// objects get this prefab by their class. The flag tile sits on its pole, a tile above
+// the ground, so the sensor reaches down over the pole to where the player stands.
+(
+    components: {
+        "Collider": (shape: Rect((12, 36)), offset: (0, -9)),
+        "Sensor": (),
+        "Script": "scripts/checkpoint.lua",
+    },
+)

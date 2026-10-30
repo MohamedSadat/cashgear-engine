@@ -10,8 +10,14 @@ use cashgear_engine::audio::AudioOutput;
 use cashgear_engine::platform::input::InputPlugin;
 use cashgear_engine::render::{FrameView, OffscreenRenderer, RenderSystems};
 
-/// The game without a window, with a mock audio device and memory storage.
+/// The game without a window, with a mock audio device and memory storage, and Lua
+/// scripts.
 fn app(options: Options) -> App {
+    app_with(options, true)
+}
+
+/// The game with the walkers and checkpoints in Lua (`scripts`) or in Rust.
+fn app_with(options: Options, scripts: bool) -> App {
     let mut app = App::new();
     app.add_plugins(AssetPlugin {
         hot_reload: Some(false),
@@ -32,6 +38,11 @@ fn app(options: Options) -> App {
     })
     .add_plugins(UiPlugin {
         locale: Some(LocaleSettings::new(&["en", "ar"])),
+        ..default()
+    })
+    .add_plugins(ScriptPlugin {
+        enabled: scripts,
+        show_errors: false,
         ..default()
     })
     .add_plugins(Game { options })
@@ -94,6 +105,89 @@ fn the_bot_plays_the_whole_game() {
         [M::Settings, M::Controls, M::Play, M::Resume, M::Next]
     );
     assert_eq!(clicks.last(), Some(&M::Quit));
+}
+
+/// What a whole game by the bot looked like: every walker's position (by spawn order in
+/// its level) and the checkpoint at every frame of play, and each level's result.
+#[derive(Debug, Default, PartialEq)]
+struct Run {
+    frames: Vec<(usize, Vec<Vec2>, Option<Vec2>)>,
+    levels: Vec<String>,
+}
+
+fn play_the_game(scripts: bool) -> Run {
+    let mut app = app_with(
+        Options {
+            demo: true,
+            level: None,
+        },
+        scripts,
+    );
+    let mut run = Run::default();
+    let mut done = Vec::new();
+    let mut exit = None;
+    for _ in 0..TIMEOUT {
+        frame(&mut app);
+        if screen(&app) == Screen::Playing {
+            let world = app.world_mut();
+            let session = world.resource::<Session>().clone();
+            let mut walkers: Vec<(u32, Vec2)> = world
+                .query::<(Entity, &enemies::Enemy, &GlobalTransform2D)>()
+                .iter(world)
+                .filter(|(_, e, _)| e.kind == enemies::Kind::Walker)
+                .map(|(entity, _, t)| (entity.index_u32(), t.translation()))
+                .collect();
+            walkers.sort_by_key(|(index, _)| *index);
+            let at = walkers.into_iter().map(|(_, at)| at).collect();
+            run.frames.push((session.level, at, session.checkpoint));
+            if session.finished.is_some() && !done.contains(&session.level) {
+                done.push(session.level);
+                run.levels.push(format!(
+                    "level {} in {:.3} s, {} of {} coins, {} hits, {} falls, {} stomps",
+                    session.level + 1,
+                    session.time,
+                    session.coins,
+                    session.coins_total,
+                    session.hits,
+                    session.falls,
+                    session.stomps
+                ));
+            }
+        }
+        exit = app.should_exit();
+        if exit.is_some() {
+            break;
+        }
+    }
+    assert_eq!(exit, Some(AppExit::Success), "scripts: {scripts}");
+    let errors = app.world().resource::<ScriptErrors>();
+    assert!(errors.is_empty(), "{:?}", errors.last());
+    if scripts {
+        let status = app
+            .world()
+            .resource::<cashgear_engine::script::ScriptStatus>();
+        let paths: Vec<&str> = status.scripts.iter().map(|s| s.path.as_str()).collect();
+        assert!(paths.contains(&"scripts/walker.lua"), "{paths:?}");
+        assert!(paths.contains(&"scripts/checkpoint.lua"), "{paths:?}");
+    }
+    run
+}
+
+/// The Lua walkers and checkpoints play exactly like the Rust ones: the same walker
+/// positions at every frame of the bot's whole game, the same checkpoints, the same
+/// results.
+#[test]
+fn the_lua_walker_and_checkpoint_match_the_rust_ones() {
+    let lua = play_the_game(true);
+    let rust = play_the_game(false);
+    assert_eq!(lua.levels.len(), 3, "{:?}", lua.levels);
+    assert_eq!(lua.levels, rust.levels);
+    assert_eq!(lua.frames.len(), rust.frames.len());
+    let checkpoints = lua.frames.iter().filter_map(|(_, _, c)| *c).count();
+    assert!(checkpoints > 0, "no checkpoint was reached");
+    for (i, (a, b)) in lua.frames.iter().zip(&rust.frames).enumerate() {
+        assert_eq!(a, b, "frame {i} of play: Lua then Rust");
+    }
 }
 
 /// One line about the bot's run, for `CG_BOT_TRACE=<frames>`.
@@ -159,11 +253,25 @@ fn levels_load_with_their_objects() {
         assert_eq!(players, 1, "level {level}");
         let enemies = world.query::<&enemies::Enemy>().iter(world).count();
         let platforms = world.query::<&things::Platform>().iter(world).count();
-        let checkpoints = world.query::<&things::Checkpoint>().iter(world).count();
         let exits = world.query::<&things::Exit>().iter(world).count();
         assert!(enemies >= 4, "level {level}: {enemies} enemies");
         assert!(platforms >= 1, "level {level}: no platform");
+        // Checkpoints and walkers run their scripts.
+        let mut objects = world.query::<(&TiledObject, Has<Script>)>();
+        let mut scripted = |class: &str| -> (usize, usize) {
+            objects
+                .iter(world)
+                .filter(|(o, _)| o.class == class)
+                .fold((0, 0), |(n, s), (_, scripted)| {
+                    (n + 1, s + usize::from(scripted))
+                })
+        };
+        let (checkpoints, scripted_checkpoints) = scripted("Checkpoint");
+        let (walkers, scripted_walkers) = scripted("Walker");
         assert!(checkpoints >= 1 && exits == 1, "level {level}");
+        assert_eq!(scripted_checkpoints, checkpoints, "level {level}");
+        assert_eq!(scripted_walkers, walkers, "level {level}");
+        assert_eq!(world.query::<&things::Checkpoint>().iter(world).count(), 0);
     }
 }
 

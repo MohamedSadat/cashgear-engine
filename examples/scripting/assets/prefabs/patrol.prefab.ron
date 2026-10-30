@@ -1,0 +1,12 @@
+// A red block that patrols the ground (`scripts/patrol.lua`), bumping into the player
+// harmlessly. Its feet are at the object's point.
+(
+    components: {
+        "Name": "patrol",
+        "Sprite": (size: Some((14, 12)), color: "#e43b44", pivot: (0.5, 0)),
+        "KinematicBody": (max_fall_speed: 480),
+        "Collider": (shape: Rect((14, 12)), offset: (0, 6)),
+        "Layer": (8),
+        "Script": "scripts/patrol.lua",
+    },
+)

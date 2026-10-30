@@ -3,6 +3,27 @@
 All notable changes to CashGear Engine are recorded here, one section per phase.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Phase 12 — Lua scripting
+
+### Added
+
+- `cg_script`: Lua 5.4 scripting through mlua 0.12.2 (Lua's C sources compiled in). A `Script` component (also a prefab component, `"Script": "scripts/patrol.lua"`) runs a `.lua` asset (`LuaScript`, `LuaScriptLoader`) on its entity. The file returns a table of hooks, called in `FixedUpdate` (`ScriptSystems::Run`) with the entity's own `self` table: `on_start`, `on_reload`, `on_event(name, data, from)`, `on_collision(other)` and `on_collision_end(other)` (from the physics' `CollisionStarted` and `CollisionEnded`), and `on_update(dt)`; timers come in between.
+- The scripts' API: entity methods for the transform, the kinematic body's velocity and contacts, the sprite's flip and colour, the animation clip, the animator's parameters and triggers, tweens, the Tiled object's properties, names, children, components (`has`), prefabs inserted into an entity, despawning and events to another script (`send`); `world.spawn`, `find`, `raycast`, `tile_at` and `overlap_point`; `input` by action; `audio.play`, `stop`, `music` and `stop_music`; `timer.after` and `every` and the same on `self`; `events.emit` (a `ScriptMessage` for the game) and `broadcast`; `state.current`, `stack`, `push`, `pop`, `replace` and `set`; `time`; `log` and `print`.
+- `AppScriptExt`: games add their own Lua functions (`add_script_function("game", "set_checkpoint", |world, (x, y): (f32, f32)| ...)`, with arguments and results as `ScriptValue`s or plain Rust types), component names for `entity:has(name)` (`add_script_component`), and the game states scripts may enter (`add_script_states`). `ScriptEvents` sends events from Rust to scripts.
+- A sandbox: no `os`, `io`, `package`, `require`, `debug`, `load`, `dofile` or `string.dump`; each file has its own globals; `math.random` starts from a fixed seed; a hook that runs more than 20 million instructions (an endless loop) is stopped (`ScriptPlugin::max_instructions`), and Lua's memory is capped at 64 MiB (`memory_limit`).
+- Errors name the script's file and line, also for errors in the engine's functions (`scripts/walker.lua:31: set_velocity: entity 12v0 has no KinematicBody`). A file that does not compile keeps its previous version running; a hook that fails stops that entity's script until the file changes. Both are logged and kept in `ScriptErrors`; `ScriptStatus` lists every script file with its entities and loads.
+- Hot reload of scripts on desktop, as for other assets: a saved file is compiled again, and every entity running it keeps its `self` and gets `on_reload`.
+- The debug overlay's Scripts window (with the `debug-overlay` feature): each script file with its entities, loads and state, and the latest errors with their tracebacks. The overlay opens by itself at a script's first error in debug builds (`ScriptPlugin::show_errors`).
+- `Scripting::runs`: whether scripts run here. On the web `cg_script` builds without Lua (mlua cannot build for `wasm32-unknown-unknown`): the plugin, components and API are there, scripts never run, and games use Rust versions of their scripted behaviours.
+- `DefaultPlugins::script` and the `--no-scripts` flag, with the facade's `script` feature; the prelude has `cg_script`'s.
+- The platformer's walkers (`assets/scripts/walker.lua`) and checkpoint flags (`assets/scripts/checkpoint.lua`, through `prefabs/checkpoint.prefab.ron`) are Lua scripts on desktop and Android, and stay Rust on the web (and with `--no-scripts`). A test plays the whole game with each and checks that every walker is in the same place at every step of play, with the same checkpoints and results.
+- `examples/scripting`: a level whose player, coins, patrolling blocks, crate spawner and goal are Lua scripts on prefabs placed in Tiled, with a HUD fed by script messages, the latest script error on screen, and a `--demo` bot written in Lua. CI runs it, and the platformer's demo with `--no-scripts` too.
+
+### Changed
+
+- `cargo check-android` and `cargo clippy-android` run through cargo-ndk (`cargo ndk -t arm64-v8a`), which hands the NDK's clang to Lua's C sources; they need cargo-ndk and an Android NDK now.
+- New dependency: mlua 0.12.2 (with `lua54` and `vendored`: lua-src builds Lua 5.4 from source with the target's C compiler), on every target but wasm32.
+
 ## Phase 11 — Android build
 
 ### Added

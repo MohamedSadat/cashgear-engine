@@ -95,15 +95,15 @@ macro_rules! android_main {
 /// storage, the world (transforms, interpolation, prefabs), assets, the window with its
 /// runner, the renderer, Tiled maps, physics, animation and effects, audio, and the UI
 /// (text, widgets, touch controls, localization and, with the `debug-overlay` feature, the
-/// F12 debug overlay).
+/// F12 debug overlay), and with the `script` feature, Lua scripts.
 ///
 /// Launch flags work on desktop and, as a query string (`?frames=60&backend=gl`), on the
 /// web: `--frames N` exits after N frames, `--no-vsync` and `--backend <list>` configure
 /// the renderer, `--hot-reload`, `--no-hot-reload`, `--asset-root <path>`,
 /// `--asset-delay <seconds>` and `--bundle <path>` the assets, `--physics-debug` draws
 /// colliders from the start, `--no-audio` turns the sound off, `--touch` and `--no-touch`
-/// show or hide the on-screen touch controls whatever the device, and `--overlay` opens
-/// the debug overlay.
+/// show or hide the on-screen touch controls whatever the device, `--overlay` opens the
+/// debug overlay, and `--no-scripts` stops Lua scripts from running (`script` feature).
 ///
 /// Configure it with struct-update syntax:
 ///
@@ -140,6 +140,9 @@ pub struct DefaultPlugins {
     /// UI settings: the game's languages, touch controls, the debug overlay. `--touch`,
     /// `--no-touch` and `--overlay` override them.
     pub ui: UiPlugin,
+    /// Lua scripting settings (`script` feature). `--no-scripts` overrides them.
+    #[cfg(feature = "script")]
+    pub script: cg_script::ScriptPlugin,
 }
 
 impl Plugin for DefaultPlugins {
@@ -162,6 +165,8 @@ impl Plugin for DefaultPlugins {
             .add_plugins(self.anim.clone())
             .add_plugins(self.audio.clone().with_args(&args))
             .add_plugins(self.ui.clone().with_args(&args));
+        #[cfg(feature = "script")]
+        app.add_plugins(self.script.clone().with_args(&args));
         #[cfg(feature = "debug-overlay")]
         register_inspect(app);
     }
@@ -183,11 +188,14 @@ fn register_inspect(app: &mut App) {
         .register_inspect::<cg_tiled::Tilemap>()
         .register_inspect::<cg_tiled::TiledObject>()
         .register_inspect::<cg_tiled::TileAnimation>();
+    #[cfg(feature = "script")]
+    app.register_inspect::<cg_script::Script>();
 }
 
 /// Common imports for game code: the app and plugins, schedules, time, the ECS, `glam`
 /// vectors, logging macros, the window, input, save storage, transforms, states, prefabs,
-/// assets, rendering, Tiled maps, physics, animation and effects, audio, and the UI.
+/// assets, rendering, Tiled maps, physics, animation and effects, audio, the UI, and with
+/// the `script` feature, scripting.
 pub mod prelude {
     pub use crate::DefaultPlugins;
     pub use cg_anim::prelude::*;
@@ -197,6 +205,8 @@ pub mod prelude {
     pub use cg_physics::prelude::*;
     pub use cg_platform::prelude::*;
     pub use cg_render::prelude::*;
+    #[cfg(feature = "script")]
+    pub use cg_script::prelude::*;
     pub use cg_tiled::prelude::*;
     pub use cg_ui::prelude::*;
     pub use cg_world::prelude::*;

@@ -32,7 +32,7 @@ CashGear Engine is a Rust 2D game engine for desktop, web and Android, proven by
 | Gamepad | `gilrs` | Desktop; web via Gamepad API |
 | Debug UI | `egui` + `egui-wgpu` + `egui-winit` | Overlay and later the editor |
 | Data files | `serde` + `ron` | Prefabs, scenes, settings |
-| Scripting | `mlua` (Lua 5.4 / Luau) | Web strategy decided in phase 12 |
+| Scripting | `mlua` (Lua 5.4, sources compiled in) | Chosen in phase 12: desktop and Android; web builds stay Rust-only |
 | Profiling | `puffin` (+ Tracy optional) |  |
 | Web tooling | `trunk`, `wasm-bindgen`, `wasm-opt` |  |
 | Android tooling | `cargo-ndk` + Gradle (Android Gradle plugin) | Chosen in phase 11: `cargo-apk` is deprecated and `xbuild` unmaintained |
@@ -374,7 +374,7 @@ A phase is done only when it runs on every target it touches, is tested, documen
 | Scope creep toward a general engine | Every feature must serve the platformer or a listed example; extras go to a backlog in `PROGRESS.md` |
 | Web limits (no threads, async-only IO, audio unlock) | Portability rules from phase 1; wasm check in CI every phase |
 | Android lifecycle and surface loss | Surface-recreation path built in phase 2, tested on device in phase 11 |
-| `mlua` not available on web | Decide the web scripting strategy at the start of phase 12 |
+| `mlua` not available on web | Decided in phase 12: web builds keep Rust versions of scripted behaviours, and a test checks both play the same |
 | Crate API churn (`wgpu`, `winit`, `bevy_ecs`) | Pin versions in the workspace; upgrade only between phases |
 | Editor grows too large | Fix v1 editor scope in phase 13 questions; Tiled remains the map editor |
 | Arabic/RTL text complexity | Use `cosmic-text` shaping; decide in phase 8 whether RTL is v1 |

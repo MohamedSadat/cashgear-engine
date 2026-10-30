@@ -53,6 +53,9 @@ log = "0.4.34"
 # Deflate for asset bundles (`cg_pack bundle` and their reader); already in the tree
 # through `tiled` (flate2).
 miniz_oxide = "0.9.1"
+# Lua 5.4 for scripts, with Lua's C sources compiled in (no system Lua needed). Desktop and
+# Android only: mlua builds for wasm32-unknown-emscripten, not wasm32-unknown-unknown.
+mlua = { version = "0.12.2", features = ["lua54", "vendored"] }
 notify = "8.2.1"
 pollster = "1.0.1"
 ron = "0.12.3"

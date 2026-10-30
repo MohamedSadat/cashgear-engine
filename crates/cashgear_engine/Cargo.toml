@@ -11,8 +11,9 @@ publish.workspace = true
 [features]
 default = ["debug-overlay"]
 # The egui debug overlay (F12): frame times, render stats, entities and components.
-debug-overlay = ["cg_ui/debug-overlay"]
-# Lua scripting. Off by default because `mlua` does not build for wasm32-unknown-unknown.
+debug-overlay = ["cg_ui/debug-overlay", "cg_script?/debug-overlay"]
+# Lua scripting (`cg_script` and `ScriptPlugin` in `DefaultPlugins`). Scripts run on desktop
+# and Android; on the web the plugin is there but runs nothing (see `cg_script`).
 script = ["dep:cg_script"]
 
 [dependencies]
@@ -27,6 +28,11 @@ cg_script = { workspace = true, optional = true }
 cg_tiled.workspace = true
 cg_ui = { workspace = true, default-features = false }
 cg_world.workspace = true
+
+# Lua itself everywhere but the web: mlua builds for wasm32-unknown-emscripten, not for the
+# wasm32-unknown-unknown target the web build uses.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cg_script = { workspace = true, optional = true, features = ["lua"] }
 
 [lints]
 workspace = true

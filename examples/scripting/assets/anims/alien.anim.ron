@@ -1,0 +1,33 @@
+// The alien's animation state machine. The game sets three parameters every fixed step
+// (`speed`, the absolute run speed; `vy`, the vertical speed; `grounded`) and fires the
+// `hurt` trigger on a hit. Each step the first transition, in this order, that leaves the
+// current state and whose conditions hold is taken. Saving this file while the example
+// runs reloads it.
+(
+    start: "idle",
+    states: [
+        // Stands, blinking now and then (the clip's two frames).
+        (name: "idle"),
+        // The run cycle keeps pace with the feet: at 120 units per second it plays at its
+        // own speed (1/120 = 0.00833).
+        (name: "run", speed_param: "speed", speed: 0.00833),
+        (name: "jump"),
+        (name: "fall"),
+        // Plays once, squashed, then goes on.
+        (name: "land"),
+        // Knocked back by spikes: the jump pose, for at least a third of a second.
+        (name: "hurt", clip: "jump"),
+    ],
+    transitions: [
+        (to: "hurt", when: [("hurt", Trigger)]),
+        (from: ["hurt"], to: "fall", min_time: 0.33, when: [("grounded", False)]),
+        (from: ["hurt"], to: "land", min_time: 0.33, when: [("grounded", True)]),
+        (from: ["idle", "run", "land"], to: "jump", when: [("grounded", False), ("vy", Gt(0))]),
+        // Walking off an edge counts as falling once the drop has some speed.
+        (from: ["idle", "run", "land", "jump"], to: "fall", when: [("grounded", False), ("vy", Le(-30))]),
+        (from: ["jump", "fall"], to: "land", when: [("grounded", True)]),
+        (from: ["land", "idle"], to: "run", when: [("speed", Gt(5))]),
+        (from: ["land"], to: "idle", after_clip: true),
+        (from: ["run"], to: "idle", when: [("speed", Le(5))]),
+    ],
+)

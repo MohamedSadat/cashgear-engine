@@ -71,8 +71,13 @@ jobs:
           run cargo run -p ui -- --demo --overlay
           # The platformer's bot plays the whole game, from the title screen through the
           # three levels to the final screen, and quits; it exits with an error if it gets
-          # stuck or loses a level.
+          # stuck or loses a level. Its walkers and checkpoints are Lua scripts here.
           run cargo run -p platformer -- --demo
+          # The same game with the Rust walkers and checkpoints (as on the web).
+          run cargo run -p platformer -- --demo --no-scripts
+          # A level that is all Lua, bot included, with the overlay's Scripts window; it
+          # exits with an error if a script fails or the bot misses the goal.
+          run cargo run -p scripting -- --demo --overlay
       - name: committed atlases are up to date
         run: >-
           cargo run -p cg_pack -- atlas examples/tiled_map/art/characters

@@ -1,0 +1,19 @@
+[package]
+name = "scripting"
+description = "CashGear example: a level whose player, coins, enemies, spawner and goal are Lua scripts."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cashgear_engine = { workspace = true, features = ["script"] }
+
+[dev-dependencies]
+# The ignored `capture_screens` test renders the level offscreen.
+pollster.workspace = true
+
+[lints]
+workspace = true

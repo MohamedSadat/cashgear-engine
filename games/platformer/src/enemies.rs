@@ -2,10 +2,14 @@
 //! turn at walls, ledges and spikes; spikers do the same but cannot be stomped; hoppers
 //! jump towards the player; bats fly back and forth. Landing on an enemy from above
 //! stomps it (spikers excepted); any other touch hurts.
+//!
+//! Where scripts run, walkers move by `scripts/walker.lua` instead of [`think`]'s walker
+//! branch, and hear of their stomp through a `stomped` event.
 
 use crate::level::LevelBounds;
 use crate::player::{Hurt, Intent, Player, SIZE};
 use crate::progress::Session;
+use crate::scripts::Scripts;
 use crate::{Art, GameSystems};
 use cashgear_engine::anim::SheetFrame;
 use cashgear_engine::prelude::*;
@@ -84,6 +88,7 @@ pub(crate) fn sheet(characters: Handle<Image>) -> SpriteSheet {
 pub(crate) fn spawn(
     commands: &mut Commands,
     art: &Art,
+    scripts: &Scripts,
     entity: Entity,
     object: &TiledObject,
     at: Vec2,
@@ -133,6 +138,11 @@ pub(crate) fn spawn(
         SpriteAnimation::new(art.enemies.clone(), clip),
         Layer(LAYER),
     ));
+    if kind == Kind::Walker
+        && let Some(walker) = &scripts.walker
+    {
+        commands.entity(entity).insert(Script::new(walker.clone()));
+    }
 }
 
 type Brain = (
@@ -145,14 +155,14 @@ type Brain = (
     &'static mut SpriteAnimation,
 );
 
-/// Each enemy's behaviour for this step.
+/// Each enemy's behaviour for this step (scripted walkers move by their script).
 fn think(
     time: Res<Time>,
     session: Res<Session>,
     bounds: Res<LevelBounds>,
     spatial: SpatialQuery,
     player: Option<Single<&GlobalTransform2D, With<Player>>>,
-    mut enemies: Query<Brain>,
+    mut enemies: Query<Brain, Without<Script>>,
     mut commands: Commands,
 ) {
     let dt = time.fixed_delta_secs();
@@ -237,6 +247,15 @@ fn think(
     }
 }
 
+/// An enemy the player touches, and whether a script runs it.
+type Touched = (
+    &'static mut Enemy,
+    &'static GlobalTransform2D,
+    &'static Collider,
+    &'static mut SpriteAnimation,
+    Has<Script>,
+);
+
 /// Stomps (falling onto an enemy from above) and hits (any other touch), from the
 /// overlaps of the latest physics step.
 #[allow(clippy::too_many_arguments)]
@@ -248,17 +267,10 @@ pub(crate) fn touch_enemies(
     mut audio: ResMut<Audio>,
     mut session: ResMut<Session>,
     player: Single<(Entity, &mut Player, &mut KinematicBody, &GlobalTransform2D)>,
-    mut enemies: Query<
-        (
-            &mut Enemy,
-            &GlobalTransform2D,
-            &Collider,
-            &mut SpriteAnimation,
-        ),
-        Without<Player>,
-    >,
+    mut enemies: Query<Touched, Without<Player>>,
     mut hurt: MessageWriter<Hurt>,
     mut shake: Single<&mut CameraShake>,
+    mut scripts: ResMut<ScriptEvents>,
 ) {
     let (entity, mut player, mut body, transform) = player.into_inner();
     if player.dying > 0.0 || player.dead {
@@ -267,7 +279,8 @@ pub(crate) fn touch_enemies(
     let bottom = transform.translation().y - SIZE.y / 2.0;
     let touching: Vec<Entity> = overlaps.with(entity).collect();
     for other in touching {
-        let Ok((mut enemy, enemy_transform, collider, mut animation)) = enemies.get_mut(other)
+        let Ok((mut enemy, enemy_transform, collider, mut animation, scripted)) =
+            enemies.get_mut(other)
         else {
             continue;
         };
@@ -285,7 +298,9 @@ pub(crate) fn touch_enemies(
                 STOMP_BOUNCE
             };
             player.set_jumping(intent.jump_held);
-            if enemy.kind == Kind::Walker {
+            if scripted {
+                scripts.send(other, "stomped", ());
+            } else if enemy.kind == Kind::Walker {
                 animation.play("walker_dead");
             }
             commands

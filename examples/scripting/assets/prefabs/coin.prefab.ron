@@ -1,0 +1,7 @@
+// A coin. The map's coin tiles have the `Coin` class (in tilesets/tiles.tsx), which picks
+// this prefab, and a `sensor` property, which gives them their sensor.
+(
+    components: {
+        "Script": "scripts/coin.lua",
+    },
+)

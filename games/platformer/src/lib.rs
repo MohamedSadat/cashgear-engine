@@ -5,7 +5,8 @@
 //!
 //! - Desktop: `cargo run -p platformer`. Add `-- --demo` to let a bot play the whole game
 //!   from the title screen to the end (it exits with an error if it gets stuck); CI runs
-//!   it. `--level N` starts in level N (1 to 3) without the menus.
+//!   it. `--level N` starts in level N (1 to 3) without the menus. `--no-scripts` uses the
+//!   Rust walkers and checkpoints instead of the Lua ones.
 //! - Web: run `trunk serve --port 8088` in `games/platformer` and open
 //!   <http://127.0.0.1:8088> (add `?demo`).
 //! - Android: `games/platformer/android` holds the Android library (one line that hands
@@ -30,7 +31,9 @@
 //! objects, `player` is the controller, `enemies` the four enemies, `things` the coins,
 //! checkpoints, springs, moving platforms and the exit, `progress` the hearts, the run
 //! through a level and the save file, `controls` the rebindable action map, `menus` and
-//! `hud` the screens, and `bot` the demo player.
+//! `hud` the screens, `bot` the demo player, and `scripts` what the Lua scripts in
+//! `assets/scripts` (the walkers and the checkpoint flags, on desktop and Android) can ask
+//! the game.
 //!
 //! Art: Kenney's Pixel Platformer (CC0, www.kenney.nl); the UI art and the digits are
 //! original. Sounds and music: original, synthesized for the engine's examples. Fonts:
@@ -44,6 +47,7 @@ mod level;
 mod menus;
 mod player;
 mod progress;
+mod scripts;
 mod things;
 
 #[cfg(test)]
@@ -187,6 +191,7 @@ impl Plugin for Game {
             .add_systems(Update, menus::show_loading.run_if(in_state(Loading)));
         controls::plugin(app);
         progress::plugin(app);
+        scripts::plugin(app);
         level::plugin(app);
         player::plugin(app);
         enemies::plugin(app);

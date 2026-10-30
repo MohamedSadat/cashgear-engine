@@ -14,7 +14,8 @@ default = ["overlay"]
 overlay = ["cashgear_engine/debug-overlay"]
 
 [dependencies]
-cashgear_engine = { workspace = true, default-features = false }
+# Scripts: the walkers and checkpoints run in Lua where Lua runs (not on the web).
+cashgear_engine = { workspace = true, default-features = false, features = ["script"] }
 # The save file and the controls are RON through serde, like the engine's settings.
 ron.workspace = true
 serde.workspace = true

@@ -1,0 +1,6 @@
+// The goal flag, which waves by its tile animation in tilesets/tiles.tsx.
+(
+    components: {
+        "Script": "scripts/goal.lua",
+    },
+)

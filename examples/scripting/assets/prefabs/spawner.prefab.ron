@@ -1,0 +1,7 @@
+// Drops a prefab (its `drops` property) every few seconds (`every`), from
+// `scripts/spawner.lua`. Nothing to see.
+(
+    components: {
+        "Script": "scripts/spawner.lua",
+    },
+)

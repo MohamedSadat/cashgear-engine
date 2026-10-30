@@ -2,7 +2,7 @@
 
 CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WASM) and Android, built with `winit`, `wgpu` and `bevy_ecs`. A sample platformer (`games/platformer`) proves it. The engine is built in 15 phases; see [docs/PLAN.md](docs/PLAN.md) for the plan and [docs/PROGRESS.md](docs/PROGRESS.md) for where it stands.
 
-> **Status:** Phase 10. `cg_core` (app, plugins, fixed-timestep loop, `Time`, schedules), `cg_platform` (window, fullscreen, input, actions, lifecycle, logging, asset IO and bundles, save storage), `cg_render` (`wgpu` sprites with hit flashes, camera, virtual resolutions, debug shapes, culling, image and atlas assets), `cg_world` (transforms and hierarchy, interpolation, a game-state stack, RON prefabs), `cg_assets` (handles, background loading, loading states, hot reload), `cg_tiled` (Tiled maps with parallax, chunked tiles, tile animations and object prefabs), `cg_physics` (kinematic bodies with slopes, one-way platforms and moving platforms, tile and entity colliders, sensors, layers, raycasts) and `cg_anim` (Aseprite sprite sheets, animation state machines and events, tweens, CPU particles, camera follow, shake and fades) `cg_audio` (OGG and WAV sounds, streamed music with crossfades, buses with saved volume settings, positional sound) and `cg_ui` (shaped text in TTF, OTF and bitmap fonts with Arabic and right-to-left layouts, nodes with anchors, rows and columns, buttons, sliders and progress bars, keyboard, gamepad, mouse and touch navigation, on-screen touch controls, localization, and an egui debug overlay) work on desktop and web, and the platformer sample game (`games/platformer`) plays through three levels on both. CI publishes the platformer's web release to <https://mohamedsadat.github.io/cashgear-engine/>.
+> **Status:** Phase 12. `cg_core` (app, plugins, fixed-timestep loop, `Time`, schedules), `cg_platform` (window, fullscreen, input, actions, lifecycle, logging, asset IO and bundles, save storage), `cg_render` (`wgpu` sprites with hit flashes, camera, virtual resolutions, debug shapes, culling, image and atlas assets), `cg_world` (transforms and hierarchy, interpolation, a game-state stack, RON prefabs), `cg_assets` (handles, background loading, loading states, hot reload), `cg_tiled` (Tiled maps with parallax, chunked tiles, tile animations and object prefabs), `cg_physics` (kinematic bodies with slopes, one-way platforms and moving platforms, tile and entity colliders, sensors, layers, raycasts) and `cg_anim` (Aseprite sprite sheets, animation state machines and events, tweens, CPU particles, camera follow, shake and fades) `cg_audio` (OGG and WAV sounds, streamed music with crossfades, buses with saved volume settings, positional sound) and `cg_ui` (shaped text in TTF, OTF and bitmap fonts with Arabic and right-to-left layouts, nodes with anchors, rows and columns, buttons, sliders and progress bars, keyboard, gamepad, mouse and touch navigation, on-screen touch controls, localization, and an egui debug overlay) work on desktop, web and Android, and `cg_script` runs gameplay written in Lua 5.4, reloaded while the game runs, on desktop and Android. The platformer sample game (`games/platformer`) plays through three levels everywhere; its walkers and checkpoints are Lua scripts where Lua runs and Rust on the web. CI publishes the platformer's web release to <https://mohamedsadat.github.io/cashgear-engine/>.
 
 ## Workspace layout
 
@@ -27,12 +27,13 @@ CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WAS
 
 ## The sample game
 
-`games/platformer` is a short platformer in three levels made in Tiled with Kenney's Pixel Platformer art: run, jump, wall-jump and stomp past walkers, spikers, hoppers and bats, collect coins, raise checkpoint flags, ride moving platforms and springs, and reach the door. Three hearts per level, a title screen, level select, settings with rebindable controls, pause, level-complete and game-over screens, touch controls, English and Arabic, and saved progress.
+`games/platformer` is a short platformer in three levels made in Tiled with Kenney's Pixel Platformer art: run, jump, wall-jump and stomp past walkers, spikers, hoppers and bats, collect coins, raise checkpoint flags, ride moving platforms and springs, and reach the door. Three hearts per level, a title screen, level select, settings with rebindable controls, pause, level-complete and game-over screens, touch controls, English and Arabic, and saved progress. The walkers and the checkpoint flags run Lua scripts (`assets/scripts/walker.lua` and `checkpoint.lua`) on desktop and Android: edit them while the game runs and they reload. The web build, where Lua cannot run, uses their Rust versions, and a test plays the whole game both ways and checks that every walker is in the same place at every step.
 
 ```sh
 cargo run -p platformer                    # keyboard (arrows or A/D, Space or Up to jump, Down + jump drops, Esc pauses) or gamepad
 cargo run -p platformer -- --demo          # a bot plays the whole game and quits (CI runs this)
 cargo run -p platformer -- --level 2       # straight into a level
+cargo run -p platformer -- --no-scripts    # the Rust walkers and checkpoints instead of the Lua ones
 cd games/platformer && trunk serve --port 8088   # web: open http://127.0.0.1:8088
 ```
 
@@ -49,7 +50,7 @@ That uses the small `web-release` profile and wasm-opt, leaves out the debug ove
 
 ## Examples
 
-Each example is its own binary crate under `examples/`, with an `index.html` for the web build.
+Each example is its own binary crate under `examples/`, with an `index.html` for the web build (but `scripting`: Lua does not run in browsers).
 
 | Example | Shows |
 | --- | --- |
@@ -61,6 +62,7 @@ Each example is its own binary crate under `examples/`, with an `index.html` for
 | `animation` | Kenney's alien from an Aseprite sheet, run by a state machine: footstep dust, squash and stretch, hit flashes, spinning coins, a waving Tiled flag, a camera that follows, shakes and zooms, and a fade into a gallery of 10,000 particles; `--demo` lets a bot play |
 | `audio` | The alien's level with sound: footsteps, jumps and landings, coins rising in pitch, a campfire and a fountain that pan as you pass, music that crossfades between two areas, and a volume panel saved between runs; `--demo` lets a bot play |
 | `ui` | A main menu, settings, a HUD and a pause menu in pixel-art UI, navigable by keyboard, gamepad, mouse and touch, in English and Arabic (right to left), with on-screen touch controls and the F12 debug overlay; `--demo` lets a bot click through |
+| `scripting` | A level whose gameplay is all Lua: the alien's controller, bobbing coins, patrolling blocks, a crate spawner on a timer and the goal, as scripts on prefabs placed in Tiled, reloaded when saved, with errors on screen and in the overlay's Scripts window; `--demo` lets a bot written in Lua play |
 
 ```sh
 cargo run -p hello_window                  # desktop
@@ -72,6 +74,7 @@ cargo run -p collision                     # add -- --demo for the bot, --physic
 cargo run -p animation                     # Z zooms, P opens the particle gallery; -- --demo for the bot
 cargo run -p audio                         # 1-4 pick a bus, -/= change it, M mutes; -- --demo for the bot
 cargo run -p ui                            # F12: debug overlay; -- --touch shows the touch controls, --demo for the bot
+cargo run -p scripting                     # edit examples/scripting/assets/scripts/*.lua while it runs; -- --demo for the bot
 
 cargo install trunk --locked               # once
 cd examples/hello_window && trunk serve    # web: open http://127.0.0.1:8080
@@ -84,13 +87,15 @@ cd examples/audio && trunk serve --port 8086       # sound starts after a key pr
 cd examples/ui && trunk serve --port 8087          # on a phone the touch controls show by themselves
 ```
 
-Every example takes `--frames N`, `--no-vsync` and `--backend <vulkan|dx12|metal|gl|webgpu>`; on the web they go in the page URL as `?frames=N&no-vsync&backend=gl`. The asset flags are `--hot-reload` / `--no-hot-reload` (on by default in debug desktop builds), `--asset-root <path>`, `--asset-delay <seconds>` (slows loading down to try loading screens) and `--bundle <path>` (reads assets from a `cg_pack bundle` file). On desktop, F11 and Alt+Enter toggle fullscreen. `--physics-debug` starts with colliders drawn (F1 toggles them), `--no-audio` turns the sound off, `--touch` / `--no-touch` show or hide the on-screen touch controls, and `--overlay` opens the debug overlay (F12 toggles it).
+Every example takes `--frames N`, `--no-vsync` and `--backend <vulkan|dx12|metal|gl|webgpu>`; on the web they go in the page URL as `?frames=N&no-vsync&backend=gl`. The asset flags are `--hot-reload` / `--no-hot-reload` (on by default in debug desktop builds), `--asset-root <path>`, `--asset-delay <seconds>` (slows loading down to try loading screens) and `--bundle <path>` (reads assets from a `cg_pack bundle` file). On desktop, F11 and Alt+Enter toggle fullscreen. `--physics-debug` starts with colliders drawn (F1 toggles them), `--no-audio` turns the sound off, `--touch` / `--no-touch` show or hide the on-screen touch controls, `--overlay` opens the debug overlay (F12 toggles it), and `--no-scripts` stops Lua scripts from running.
 
 ### Assets
 
 A game's files live in its own `assets/` folder and are loaded by path: `server.load("maps/level1.tmx")`. Under `cargo run` that folder is found through `CARGO_MANIFEST_DIR`; a shipped executable looks for `assets` next to itself, and `CG_ASSET_ROOT` overrides both. On the web, `trunk` copies the folder next to `index.html` (`<link data-trunk rel="copy-dir" href="assets" />`) and the engine fetches from there.
 
 Sprite animations come from Aseprite: export a sprite sheet with its JSON data ("Hash" or "Array", with tags) next to the image and load the `.json` as a `SpriteSheet`; each tag becomes a clip, and a tag's user data can carry events (`0:footstep, 3:footstep`). Animation state machines are `.anim.ron` files. Both hot-reload like any asset.
+
+Lua scripts are `.lua` files loaded as `LuaScript` assets and run by a `Script` component, which prefabs can carry: `"Script": "scripts/patrol.lua"`. Each file returns a table of hooks (`on_start`, `on_update`, `on_collision`, `on_event`...) and every scripted entity gets its own `self`; the API and the sandbox are described in `cg_script`'s documentation (`cargo doc -p cg_script --open`).
 
 Sounds are OGG Vorbis or WAV files, mono or stereo, loaded as `Sound` assets. Files up to 10 seconds are decoded when they load; longer ones (music) stay compressed and are streamed while they play.
 
@@ -119,7 +124,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 cargo check-wasm   # alias: cargo check for wasm32-unknown-unknown, desktop tools excluded
 cargo clippy-wasm  # alias: the same, linted with warnings denied (CI runs this)
+cargo check-android    # alias: the same for Android (arm64), through cargo-ndk
+cargo clippy-android   # alias: linted with warnings denied (CI runs this)
 ```
+
+The Android aliases need `cargo install cargo-ndk` and the Android NDK (`ANDROID_NDK_HOME`, or an NDK under `ANDROID_HOME`): Lua's C sources are compiled for Android even to check.
 
 CI runs all of these on Windows and Ubuntu for every push to `main` and every pull request.
 

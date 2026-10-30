@@ -18,8 +18,8 @@ This file tracks phase status, the decisions made at the start of each phase, kn
 | 9 | Platformer sample game | Done | `phase-9` |
 | 10 | Web build | Done | `phase-10` |
 | 11 | Android build | Done | `phase-11` |
-| 12 | Lua scripting | Next | |
-| 13 | Scene editor | Not started | |
+| 12 | Lua scripting | Done | `phase-12` |
+| 13 | Scene editor | Next | |
 | 14 | Polish, performance and release | Not started | |
 
 ## Phase 0 — Repository and workspace
@@ -759,6 +759,71 @@ Other choices made during the phase:
 - For Google Play: make an upload keystore with `keytool` (the README has the command), write `keystore.properties`, and run `gradlew.bat bundleRelease`. For CI to sign, add the secrets `CG_ANDROID_KEYSTORE_BASE64`, `CG_ANDROID_KEYSTORE_PASSWORD`, `CG_ANDROID_KEY_ALIAS` and `CG_ANDROID_KEY_PASSWORD` to the repository. Uploading to the Play Console is yours.
 - For the emulator on this machine: run `D:\Android\sdk\extras\google\Android_Emulator_Hypervisor_Driver\silent_install.bat` as an administrator once, then `emulator -avd cashgear_api36`.
 
+## Phase 12 — Lua scripting
+
+### Decisions
+
+| Question | Answer |
+| --- | --- |
+| Lua 5.4 or Luau | Lua 5.4 (PUC-Rio, 5.4.9), through mlua 0.12.2 with its sources compiled in (`vendored`). It is plain C, so the NDK's clang builds it for Android as well. |
+| Web strategy | Web builds stay Rust-only. mlua builds for `wasm32-unknown-emscripten` only, which the winit, wgpu and wasm-bindgen build cannot use; piccolo, the pure-Rust Lua, has had no release since June 2024; compiling scripts to Rust is a compiler project of its own. On the web `cg_script` builds without Lua: the plugin, the components and the API are there, scripts never run, and `Scripting::runs` is false. The platformer keeps Rust versions of its scripted walker and checkpoint and uses them there. |
+| Lua on Android | Yes, as on desktop. Lua is compiled into the game's Android library with the NDK's clang (cargo-ndk), and the scripts travel in the APK's `assets.cgpak`. No hot reload there. |
+| API in v1 | The plan's list: the entity (transform, kinematic body, sprite, animation clip and animator, tweens, Tiled properties, hierarchy), input actions, raycasts and tile queries, spawning and despawning prefabs, audio, timers, events both ways, state changes, logging, and functions games add. UI and locale bindings wait (see the notes for later phases). |
+
+Chosen without asking (said with the questions):
+
+- **Hooks run in fixed steps**, in `ScriptSystems::Run` in `FixedUpdate`, so a script's run depends only on the number of steps, and the Lua walker can match the Rust one step for step. The game puts the set where it belongs among its own.
+- **One Lua state for the app.** Each file returns a table of hooks; each scripted entity gets its own `self` table, which keeps its fields when the file reloads; each file has its own globals.
+- **The sandbox:** `string`, `table`, `math`, `utf8`, `coroutine` and the safe part of the base library; no `os`, `io`, `package`, `require`, `debug`, `load`, `dofile`, `loadfile`, `collectgarbage` or `string.dump`. `math.random` starts from a fixed seed. An instruction budget per hook call and a memory cap.
+- **Errors** are logged with the file and line and kept for the debug overlay; a failing hook stops that entity's script until its file changes.
+- **The proof** that the Lua enemy behaves the same: a test plays the whole game with the Lua and with the Rust versions and compares every walker's position at every frame.
+
+Other choices made during the phase:
+
+- **Lending the world to Lua.** The run is an exclusive system. It takes the runtime (a non-send resource: Lua is not `Send`) out of the world, opens `Lua::scope`, and puts the world in the registry as a scoped userdata (`create_any_userdata_ref_mut`). Every engine function borrows it for its own duration (`borrow_mut_scoped`), and the run borrows it between hooks. No `unsafe`: a double borrow would be an error, and none happens, since the engine's functions never call back into Lua. Outside a run (a file's top level) the functions say that they only work in hooks.
+- **A run, in order:** new and changed files are compiled; instances are dropped for entities that lost their `Script` (their timers too) and made for new ones, in entity order; then `on_start`, `on_reload`, events (up to eight rounds, so a reply to an event arrives in the same step), collisions (both sides of each `CollisionStarted` and `CollisionEnded`), due timers, and `on_update`. A hook is skipped once its entity is gone, so a script can despawn others.
+- **Game code has no mlua types.** Game functions take and return `ScriptValue`s (or tuples of plain Rust types read from them), and events carry them, so a game that adds functions compiles on the web, where there is no mlua. Lua tables become lists when their keys are exactly 1 to n and maps otherwise; a script's `self` crosses as its entity.
+- **Entities in Lua** are a small userdata whose `__index` is the same methods table that `self` tables use, so `self:position()` and `other:position()` are the same function, and methods take either. Setters write only changed values, so change detection stays quiet. A missing component is an error that names the entity and the component.
+- **Errors read like Lua's own.** An error raised in an engine function gets the script's file and line from the traceback: `scripts/body.lua:3: set_velocity: entity 0v0 has no KinematicBody`. A file that does not compile (or returns no table) keeps its previous version running.
+- **The budget** counts in steps of 1,000 instructions through a Lua count hook, reset before each hook call: 20 million by default, about a second of pure Lua.
+- **Timers** are counted in fixed steps from the step that made them (at least one), and fire in the order they were made.
+- **The tween option for repeats is `repeats`**, since `repeat` is a Lua keyword.
+- **Android aliases.** `cargo check-android` and `clippy-android` now run through cargo-ndk, which hands the NDK's clang to lua-src; plain cargo cannot compile Lua's C code for Android.
+- **The platformer.** Its scripts run in `GameSystems::Move`, so only while a level is played. Walkers keep the Rust `Enemy` component (kind `Walker`): stomps and touches stay in Rust for every enemy, `think` skips scripted walkers, and a stomp sends the script a `stomped` event. The checkpoint prefab is loaded only when scripts run; `cg_tiled` then gives it to the map's `Checkpoint` objects by their class, and the Rust checkpoint code steps aside. The game gives scripts `game.fell(y)`, `game.set_checkpoint(x, y)`, `game.player_active()` and the component name `Player`.
+- **Exactly the same.** Lua numbers are doubles and the engine's are `f32`. For the walker's sums and products of `f32` values and small constants, one rounding to `f32` at the API gives the same bits as Rust's `f32` arithmetic, and the test confirms it.
+- **The example has no web page**, since its gameplay is all Lua.
+- **Versions.** mlua 0.12.2 (`lua54`, `vendored`), mlua-sys 0.13.0, lua-src 551.0.2 (Lua 5.4.9); all MIT.
+
+### Done
+
+- `cg_script`: `ScriptPlugin` (`enabled`, `max_instructions`, `memory_limit`, `show_errors`, `with_args` for `--no-scripts`), `ScriptSystems`, `Script` (a prefab component), `LuaScript`, `LuaScriptLoader`, `ScriptEvents`, `ScriptEvent`, `ScriptMessage`, `ScriptErrors`, `ScriptError`, `ScriptStatus`, `ScriptInfo`, `Scripting`, `ScriptApi`, `AppScriptExt` (`add_script_function`, `add_script_component`, `add_script_states`), `ScriptValue`, `FromScriptValue`, `IntoScriptValue`, `FromScriptArgs` and a prelude; the Lua runtime and its bindings (feature `lua`); the Scripts window in the debug overlay (feature `debug-overlay`).
+- `cashgear_engine`: `DefaultPlugins::script` and `--no-scripts` with the `script` feature, which brings Lua on every target but wasm32; the `Script` component in the overlay's inspector; the prelude.
+- `games/platformer`: `assets/scripts/walker.lua`, `assets/scripts/checkpoint.lua`, the `Checkpoint` and `CheckpointSparks` prefabs, the `scripts` module and `--no-scripts`.
+- `examples/scripting` (new): the alien's controller, coins, patrolling blocks, a crate spawner and the goal as Lua scripts on prefabs placed in Tiled, a HUD fed by `ScriptMessage`s that shows the latest script error, and a bot written in Lua.
+- The `check-android` and `clippy-android` aliases through cargo-ndk.
+- 447 tests (26 more than Phase 11): the hooks and their order, separate `self`s, despawned entities, reloads keeping `self`, errors stopping an entity until its file changes, errors in engine functions naming the script's line, files that do not compile, the instruction budget, the sandbox and per-file globals, the fixed seed, the API outside hooks, events from Rust, between scripts and to the game, timers and cancelling them, timers of despawned entities, collisions on both sides, transforms, sprites, spawning prefabs, `has`, raycasts and overlaps, state changes limited to the allowed states, errors from game functions, tweens and easing names, turned-off scripts, value conversions; the platformer's whole game played with Lua and with Rust and compared frame by frame; the example's bot reaching the goal. The reference PNGs are unchanged.
+- CI: `platformer --demo --no-scripts` and `scripting --demo --overlay`.
+
+### Verified
+
+- All tests pass; fmt, clippy (desktop, wasm and Android) and rustdoc with warnings denied are clean.
+- The Lua walker and checkpoint match the Rust ones: every walker's position at every frame of the bot's whole game (about 6,000 frames of play), every checkpoint and every level's result are identical. The test is not vacuous: moving the walker's ledge check out by one pixel fails it at frame 4,414 (level 3), and moving the checkpoint's respawn point by one pixel fails it at frame 451.
+- Desktop (Windows, GTX 1650, Vulkan), windowed: `platformer --demo` with Lua and with `--no-scripts` both finish the three levels in 26.3, 35.8 and 38.0 s with 15, 15 and 19 coins and the same seven checkpoints at the same places (the Lua and the Rust code log them alike), exit success. `scripting --demo --overlay` reaches the goal after 10.4 s with 14 of 19 coins (the Rust animation bot on the same level: 10.5 s, 14 of 19), no warnings, exit success.
+- Hot reload on desktop, with `platformer --level 1` running: a script saved `walker.lua` with the walkers twice as fast and an `on_reload` hook. The log showed `reloaded scripts/walker.lua` and each of the three walkers logging where it was and which way it faced (its `self` kept); restoring the file reloaded it again.
+- Errors: a mistake in the example's crate prefab came out as `scripts/spawner.lua:10: spawn: line 6, column 25: Expected option`, the line of the script and the place in the prefab.
+- What scripts cost, in a release build on this machine, with 500 scripted kinematic bodies (the physics alone: 1.48 ms a step): an empty `on_update` adds about 0.6 µs per entity, `position` and `set_position` about 2.4 µs, `contacts` (a new table) 5.5 µs, `world.raycast` 7.5 µs. The platformer's dozen scripted entities cost well under a tenth of a millisecond a step.
+- Android: `cargo clippy-android` compiles Lua for aarch64 with the NDK's clang. The debug APK builds here (`gradlew assembleDebug -PcgAbis=arm64-v8a`, 3 min 17 s with a warm cache): its arm64 library, Lua included, is 20.8 MB in the APK (19 MB in Phase 11), and its `assets.cgpak` holds the scripts and the checkpoint prefabs.
+- Web (`trunk serve`, the app's browser pane, debug wasm, WebGPU), `?demo`: the platformer, built with `cg_script` but no Lua, finished level 1 and was 22.5 s into level 2 with a checkpoint raised when checked by screenshot, with no errors in the console: the Rust walkers and checkpoints run there.
+- Not checked by me: the scripts on an Android device (none was connected, as in Phase 11), and listening to the example's sounds.
+
+### Manual checks for the user
+
+- Desktop: `cargo run -p platformer -- --level 1`. While it runs, open `games/platformer/assets/scripts/walker.lua`, change `self.dir * self.speed` in `on_update` to `self.dir * self.speed * 3` and save: the blue walkers speed up where they are. Undo it and save.
+- Break a script on purpose (write `self:set_velocityy(` and save): the debug overlay opens on the Scripts window with the error, its file and line, and the terminal logs it; the walkers keep the version before. Then make a runtime error instead (`self:set_velocityy(0)`, which compiles): the walkers stop. Fix it and save, and they walk again.
+- `cargo run -p scripting`: play the level (arrows or A/D, Space). Coins bob and chime, red blocks patrol and flash when bumped, crates drop from the sky every 2.5 s and fade away, the flag wins. Edit `examples/scripting/assets/scripts/player.lua` (`JUMP_SPEED = 330` to `500`) and save: the alien jumps higher at once. F12 shows the Scripts window.
+- `cargo run -p platformer -- --no-scripts` plays with the Rust walkers and checkpoints; it should feel the same.
+- On a phone: build and install as in Phase 11 (`games/platformer/android`); the walkers and checkpoints there are the Lua ones. `adb logcat -s cashgear` shows `scripts/checkpoint.lua: checkpoint at ...` when a flag is raised.
+
 ## Known issues
 
 - On the web, `AppExit` stops the loop but leaves the page; there is nowhere to exit to.
@@ -841,6 +906,18 @@ Other choices made during the phase:
 - Without a keystore, release builds (and CI's AAB without the secrets) are unsigned; Google Play takes only signed ones.
 - There is no soft keyboard (nothing in the engine takes typed text yet).
 
+- Lua scripts do not run on the web (mlua cannot build for `wasm32-unknown-unknown`). A game shipping there keeps Rust versions of what its scripts do and picks by `Scripting::runs`, as the platformer does.
+- Hooks run only in fixed steps (`ScriptSystems::Run`); there is no per-frame hook, so scripts cannot smooth anything between steps. The game places the set: the platformer runs it only while a level is played.
+- Each call from Lua into the engine costs about a microsecond (it looks up and borrows the world), and calls that return tables (`contacts`, `raycast`) 5 to 8 µs. Dozens of scripted entities cost nothing measurable; thousands would want cheaper calls (Phase 14).
+- There is no `require`: each file stands alone, and shared code goes into the game's functions or is repeated.
+- `pairs` visits a table's keys in an order that changes from run to run (Lua seeds its string hashes at start). Scripts that must repeat exactly use `ipairs` or sorted keys.
+- Lua numbers are doubles and engine values `f32`. Simple arithmetic gives the same bits as Rust's (the platformer's walker is tested to match), but long chains of operations in Lua can differ in the last bit from the same code in Rust.
+- The instruction budget counts Lua instructions only, in steps of 1,000; time spent in the engine's functions is not counted.
+- A failing hook stops its entity's script until the file changes (another entity's failure does not). Map objects respawn on a map reload, so scripted objects start over then, with new `self`s.
+- `entity:has(name)` knows only registered component names (the engine's main ones, and those games add).
+- `audio.play` loads a sound on first use if the game did not; a one-shot that has to wait more than half a second for it is skipped, as for Rust code. Preload sounds a script plays.
+- Scripts reach a Tiled object's properties, not other objects by their id; `world.find(name)` finds an entity by its `Name`.
+
 ## Notes for later phases
 
 - **Any phase:** `trunk` only watches the example folder, so touch the example after editing engine crates while `trunk serve` runs.
@@ -888,6 +965,9 @@ Other choices made during the phase:
 - **Phase 13:** the editor is desktop only; `check-android` and `clippy-android` leave out `cg_editor` and `cg_pack`.
 - **Phase 14:** for a Play release: the version code from the tag, a signed AAB from CI, the libraries' debug symbols for Play's crash reports (`debugSymbolLevel`), a foreground layer for the launcher icon, and the frame rate and battery on a mid-range phone. The `cargo generate` template can include `games/platformer/android`.
 
+- **Phase 13:** the editor can list a scene's scripts and edit a `Script` component as its asset path; the Scripts window is an egui window the editor can show. Play-in-editor runs scripts like the game; `self` tables are not saved, so stopping play and playing again starts every script fresh. A `Script` in a prefab is a path string, so prefabs the editor writes keep it.
+- **Phase 14:** profile the script run (a puffin scope around it and its hooks) and make engine calls cheaper (cache the lent world, reuse result tables); `require` for shared script files; Lua bindings for UI text, buttons and the locale; script docs in the mdBook guide (the hooks, the API, the sandbox, hot reload, the web strategy); the `cargo generate` template can include `scripts/` and the `--no-scripts` pattern.
+
 ## Backlog
 
 Features that came up but don't serve the platformer or a listed example go here.
@@ -916,4 +996,5 @@ Features that came up but don't serve the platformer or a listed example go here
 - `QueryFilter` excluding several entities.
 - Platformer extras: more levels, a double jump or dash, collectible gems, enemies that throw things, a level timer leaderboard.
 - Web: uploading to itch.io from CI with butler (needs an API key secret), a service worker for offline play, content-hashed bundle names, the page following the game's language, and cpal's AudioWorklet output (needs cross-origin isolation headers, which GitHub Pages cannot set).
+- Scripting: `require` of other script files, Lua bindings for UI and the locale, a per-frame hook, coroutines that wait across steps (`wait(seconds)`), Luau as an alternative runtime, and scripts on the web through a Lua compiled for `wasm32-unknown-unknown` if one appears.
 - Android: gamepads, a soft keyboard for text fields, GameActivity, Android TV and ChromeOS, keeping clear of rounded screen corners, and Play Asset Delivery if the bundle grows.
