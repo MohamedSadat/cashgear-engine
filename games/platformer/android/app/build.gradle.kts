@@ -64,12 +64,6 @@ android {
     }
 }
 
-// The only code besides the Rust library is the engine's Java activity. AGP 9 adds the
-// Kotlin standard library to every app (2 MB of dex); this app has no Kotlin.
-configurations.configureEach {
-    exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
-}
-
 /** Builds the game's Rust library for some ABIs with cargo-ndk. */
 abstract class CargoNdk : DefaultTask() {
     @get:Input abstract val abis: ListProperty<String>
@@ -82,6 +76,8 @@ abstract class CargoNdk : DefaultTask() {
 
     @TaskAction
     fun build() {
+        // Start empty, so libraries of ABIs no longer asked for leave the APK.
+        outputDir.get().asFile.deleteRecursively()
         val command = mutableListOf("cargo", "ndk")
         abis.get().forEach { command += listOf("-t", it) }
         command += listOf(

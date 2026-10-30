@@ -26,7 +26,7 @@ adb shell am start -n com.cashgear.platformer/com.cashgear.engine.CashGearActivi
 
 On Windows use `gradlew.bat`. The debug APK holds arm64 (phones) and x86_64 (emulators) libraries; `-PcgAbis=arm64-v8a` builds only one. Android Studio can open this folder too.
 
-- Logs: `adb logcat -s cashgear` (the engine's log, panics included with a backtrace).
+- Logs: `adb logcat -s cashgear` (the engine's log, panics included). Backtraces show addresses, since the packaged libraries are stripped; `ndk-stack -sym app/build/generated/jniLibs/cargoNdkDebug/arm64-v8a` names the frames.
 - Launch flags go in the intent's `args` extra, as on the desktop command line:
   `adb shell am start -n com.cashgear.platformer/com.cashgear.engine.CashGearActivity --es args "--demo"` lets the bot play; `--level 2`, `--backend gl` and the engine's other flags work too.
 - Saves live in the app's private folder (`files/cashgear-platformer/`); uninstalling removes them.

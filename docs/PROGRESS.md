@@ -715,8 +715,8 @@ Other choices made during the phase:
 - **Assets.** Gradle stores `assets.cgpak` uncompressed in the APK (`noCompress`), so the asset manager hands it over as it is. The engine reads it whole into memory, as on the web, and `AssetIo` uses it as its bundle by itself; loose files in the APK's `assets/` are read through the asset manager.
 - **Saves** go to the app's private files folder (`internal_data_path`), under the game's namespace.
 - **Logs** go to logcat through `__android_log_write` (no logging crate), tag `cashgear`, one entry per line and at most 4000 bytes each. Panics are logged with a backtrace before the default hook runs.
-- **Gradle.** The Variant API registers two tasks per variant whose folders become the APK's native libraries and assets: `cargoNdk<Variant>` (cargo decides what to rebuild, so it always runs) and `bundleAssets<Variant>` (`cg_pack bundle`). The engine's Java folder is added to the app's sources. AGP 9 adds the Kotlin standard library to every app; excluding it took `classes.dex` from 2 MB to 119 KB. The Gradle 9.8.2 wrapper is in the repository.
-- **ABIs and profiles.** Debug APKs hold arm64-v8a (phones) and x86_64 (emulators), built with the `dev` profile; release builds add armeabi-v7a and use `[profile.android-release]` (LTO, one codegen unit, debug info stripped but symbols kept, so panic backtraces in logcat name functions). `-PcgAbis=arm64-v8a` builds fewer.
+- **Gradle.** The Variant API registers two tasks per variant whose folders become the APK's native libraries and assets: `cargoNdk<Variant>` (cargo decides what to rebuild, so it always runs; it empties its folder first, so the libraries of ABIs no longer asked for leave the APK) and `bundleAssets<Variant>` (`cg_pack bundle`). The engine's Java folder is added to the app's sources. AGP 9 adds the Kotlin standard library to every app; `kotlin.stdlib.default.dependency=false` in `gradle.properties` leaves it out, which took `classes.dex` from 2 MB to 119 KB. (Excluding it from every configuration instead also took it from Android lint, which runs on Kotlin, and broke the release build's lint step in CI.) The Gradle 9.8.2 wrapper is in the repository.
+- **ABIs and profiles.** Debug APKs hold arm64-v8a (phones) and x86_64 (emulators), built with the `dev` profile; release builds add armeabi-v7a and use `[profile.android-release]` (LTO, one codegen unit, no debug info). `-PcgAbis=arm64-v8a` builds fewer. The Android Gradle plugin strips the symbols of every library it packages, debug ones too (the 509 MB debug library becomes 19 MB in the APK).
 - **16 KB pages.** NDK r28 and newer link with 16 KB alignment by default, which Google Play requires for apps targeting Android 15 and newer; the libraries' load segments are aligned to `0x4000`.
 - **`AppExit` as the exit code.** The platformer became a library so the Android library can call `platformer::run`; its `main.rs` and every example's `main` now return the `AppExit`, through a new `impl Termination for AppExit`. Before, `main` dropped it and the process exited with 0 even when a demo bot failed, so CI could not see a failing demo.
 - **The launcher icon** is an adaptive icon whose background layer is the web favicon's art, scaled up by whole numbers by a scratch script (not in the repository).
@@ -834,7 +834,8 @@ Other choices made during the phase:
 - Android has no gamepads yet: winit's Android backend and gilrs do not read them. Touch controls only.
 - The game runs once per process: the activity ends the process when Android destroys it (the game quit from the title, the task swiped away), so nothing in memory survives that; the platformer keeps its saves in `Storage`. A launch while the game runs (`singleTask`) brings it forward, and a new intent's `args` extra is ignored.
 - Only display cutouts are kept clear; rounded screen corners can clip the corners of the HUD a little.
-- Release libraries keep their symbol tables, for readable backtraces in logcat; stripping them would make the APK smaller (not measured). A release build of the three ABIs takes about 20 minutes from clean.
+- Panic backtraces in logcat show addresses, not function names, since the Android Gradle plugin strips the libraries it packages. The panic's message and place are there; `ndk-stack` with the unstripped libraries in `app/build/generated/jniLibs` names the frames.
+- A release build of the three ABIs takes about 20 minutes from clean, here and in CI.
 - Without a keystore, release builds (and CI's AAB without the secrets) are unsigned; Google Play takes only signed ones.
 - There is no soft keyboard (nothing in the engine takes typed text yet).
 
@@ -883,7 +884,7 @@ Other choices made during the phase:
 
 - **Phase 12:** check that `mlua` with vendored Lua builds for Android through cargo-ndk (it compiles C with the NDK's clang); Luau is C++ and needs the NDK's C++ library linked. Keep `cg_script` behind the `script` feature so `clippy-android` and the APK build stay green until it does.
 - **Phase 13:** the editor is desktop only; `check-android` and `clippy-android` leave out `cg_editor` and `cg_pack`.
-- **Phase 14:** for a Play release: the version code from the tag, a signed AAB from CI, symbols stripped from the libraries and uploaded to Play instead (the AAB already carries the metadata), a foreground layer for the launcher icon, and the frame rate and battery on a mid-range phone. The `cargo generate` template can include `games/platformer/android`.
+- **Phase 14:** for a Play release: the version code from the tag, a signed AAB from CI, the libraries' debug symbols for Play's crash reports (`debugSymbolLevel`), a foreground layer for the launcher icon, and the frame rate and battery on a mid-range phone. The `cargo generate` template can include `games/platformer/android`.
 
 ## Backlog
 
