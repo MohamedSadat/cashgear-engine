@@ -5,6 +5,12 @@ before the first release one section per phase. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/) (in 0.x, a minor version may break games).
 
+## [Unreleased]
+
+### Fixed
+
+- A game made from the template no longer shows three `error: invalid character ...` lines the first time Cargo resolves the engine: Cargo reads every manifest in a git dependency, and the template's manifests held cargo-generate placeholders. They are `Cargo.toml.liquid` files now, which cargo-generate renders into `Cargo.toml`. (Builds worked before; the lines were only alarming.)
+
 ## [0.1.0] — 2026-10-31
 
 The first release of CashGear Engine, a Rust 2D game engine for Windows, Linux, macOS, the web and Android. It has everything its fifteen phases built (the sections below): a fixed-step game loop, `wgpu` sprite batching with pixel-perfect scaling, entities and prefabs, background asset loading with hot reload, Tiled maps, platformer physics, Aseprite animation, tweens and particles, audio, text and UI with right-to-left languages and touch controls, Lua scripting, a scene editor, and web and Android builds. The sample platformer shows it all: play it at <https://mohamedsadat.github.io/cashgear-engine/>, or download it below for Windows and Android.

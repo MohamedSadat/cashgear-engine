@@ -16,7 +16,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKSPACE = ROOT / "Cargo.toml"
-TEMPLATE = ROOT / "templates" / "game" / "Cargo.toml"
+# A `.liquid` file: cargo-generate renders it and drops the extension, and Cargo, which
+# reads every manifest in a git dependency, never sees its placeholders.
+TEMPLATE = ROOT / "templates" / "game" / "Cargo.toml.liquid"
 CHANGELOG = ROOT / "CHANGELOG.md"
 # Files that name the release tag users install from.
 TAGGED = [
