@@ -15,6 +15,8 @@ Or on its own, for any asset folder, where Play runs only the engine (physics, a
 cargo run -p cg_editor -- --asset-root path/to/assets maps/level.tmx
 ```
 
+Given no file, it opens the first map in the folder's `maps/`. Its Play binds the actions `left`, `right`, `down` and `jump` as the template does, so scripts that read them can be played. Each [release](https://github.com/MohamedSadat/cashgear-engine/releases) has this editor for Windows as a zip, with no Rust needed: `CashGear Editor.exe` and the scripting example's assets beside it, which it opens on. Start it with `--asset-root` (as above) to edit another folder.
+
 ## What it shows
 
 The level in the middle, drawn by the engine; around it a hierarchy of the map's layers and objects (and the prefab's tree), a palette of the tileset's classed tiles, prefabs and shapes, an inspector, an asset browser with thumbnails, and a console with the engine's log.

@@ -1,7 +1,8 @@
 name: Release
 
-# Pushing a tag `vX.Y.Z` builds the sample platformer for Windows, the web and Android and
-# publishes them in a GitHub Release, with the tag's CHANGELOG.md section as its notes.
+# Pushing a tag `vX.Y.Z` builds the sample platformer for Windows, the web and Android, and
+# the scene editor for Windows, and publishes them in a GitHub Release, with the tag's
+# CHANGELOG.md section as its notes.
 # Running the workflow by hand builds everything without publishing (a dry run).
 # tools/release.py describes the steps before the tag.
 
@@ -44,7 +45,7 @@ jobs:
           path: notes.md
 
   windows:
-    name: Windows build
+    name: Windows builds
     needs: check
     runs-on: windows-latest
     env:
@@ -52,10 +53,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v2
-      - name: build the game and its asset bundle
+      - name: build the game, its asset bundle and the editor
+        # Separate builds, so the editor's engine features (the overlay, scripting) stay
+        # out of the game.
         run: |
           cargo build --release -p platformer
           cargo run --release -p cg_pack -- bundle games/platformer/assets target/release/assets.cgpak
+          cargo build --release -p cg_editor
       - name: zip
         # The game finds assets.cgpak next to its executable.
         shell: bash
@@ -67,10 +71,48 @@ jobs:
           cp games/platformer/assets/KENNEY-LICENSE.txt "$dir/"
           printf 'CashGear Platformer %s\r\n\r\nRun "CashGear Platformer.exe". Arrows or A/D to run, Space to jump, Esc to pause;\r\na gamepad works too. F11 or Alt+Enter: fullscreen.\r\n\r\nMade with CashGear Engine: https://github.com/MohamedSadat/cashgear-engine\r\nArt: Kenney (CC0), see KENNEY-LICENSE.txt.\r\n' "$VERSION" > "$dir/README.txt"
           7z a "$dir.zip" "$dir"
+      - name: zip the editor
+        # The editor edits the loose files in assets/ next to it (no bundle) and opens the
+        # first map in assets/maps/ when started without one.
+        shell: bash
+        run: |
+          dir="CashGear-Editor-$VERSION-windows"
+          mkdir "$dir"
+          cp target/release/cg_editor.exe "$dir/CashGear Editor.exe"
+          cp -r examples/scripting/assets "$dir/assets"
+          cp LICENSE-MIT LICENSE-APACHE "$dir/"
+          cat > "$dir/README.txt" <<EOF
+          CashGear Editor $VERSION
+
+          The scene editor of CashGear Engine. Run "CashGear Editor.exe": it opens the
+          sample level assets/maps/playground.tmx, from the engine's scripting example.
+
+          Place prefabs, tiles and shapes from the palette; W, E and R move, rotate and
+          resize; the inspector edits names, classes and properties; Ctrl+Z undoes and
+          Ctrl+S saves into the .tmx. F5 plays the level (physics, animation and the Lua
+          scripts in assets/scripts): arrows or A/D run, Space jumps, a gamepad works
+          too. F5 again stops it and puts the level back as it was. Tiled
+          (https://www.mapeditor.org) stays the editor for the tiles.
+
+          To edit another asset folder:
+
+              "CashGear Editor.exe" --asset-root D:/my_game/assets maps/level.tmx
+
+          Play here runs only the engine's systems. A game's own editor build
+          (cargo run -p my_game_editor) runs the game's Rust code too.
+
+          Guide: https://mohamedsadat.github.io/cashgear-engine/book/editor.html
+          Made with CashGear Engine: https://github.com/MohamedSadat/cashgear-engine
+          Art: Kenney (CC0), see assets/KENNEY-LICENSE.txt.
+          EOF
+          sed -i 's/$/\r/' "$dir/README.txt"
+          7z a "$dir.zip" "$dir"
       - uses: actions/upload-artifact@v7
         with:
           name: windows
-          path: CashGear-Platformer-*-windows.zip
+          path: |
+            CashGear-Platformer-*-windows.zip
+            CashGear-Editor-*-windows.zip
 
   web:
     name: web build
@@ -173,7 +215,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           ls -l release
-          gh release create "$TAG" release/CashGear-Platformer-* \
+          gh release create "$TAG" release/CashGear-Platformer-* release/CashGear-Editor-* \
             --repo "$GITHUB_REPOSITORY" \
             --title "CashGear Engine $TAG" \
             --notes-file release/notes.md \

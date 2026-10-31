@@ -10,8 +10,11 @@ function goal.on_collision(self, other)
   audio.play("sounds/goal.ogg", { volume = 0.7 })
   self:tween("scale", 1, 0.4, { from = 1.5, ease = "BackOut" })
   events.broadcast("won")
-  state.set("Won")
   log.info(("reached the goal after %.1f s"):format(time.now))
+  -- The example's Rust has the win screen; the standalone editor's Play has no game to win.
+  if game then
+    state.set("Won")
+  end
 end
 
 return goal

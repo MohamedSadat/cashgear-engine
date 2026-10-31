@@ -164,6 +164,30 @@ impl EditorPlugin {
     }
 }
 
+/// The controls the standalone editor (`cg_editor`) gives Play, for scripts that read
+/// them: the actions `left`, `right`, `down` and `jump` on the arrows, WASD, Space and a
+/// gamepad, as the game template binds them. A game's own editor uses the game's controls.
+pub fn play_controls() -> ActionMap {
+    use AxisDirection::{Negative, Positive};
+    ActionMap::new()
+        .bind("left", KeyCode::ArrowLeft)
+        .bind("left", KeyCode::KeyA)
+        .bind("left", GamepadButton::DPadLeft)
+        .bind("left", Binding::Axis(GamepadAxis::LeftStickX, Negative))
+        .bind("right", KeyCode::ArrowRight)
+        .bind("right", KeyCode::KeyD)
+        .bind("right", GamepadButton::DPadRight)
+        .bind("right", Binding::Axis(GamepadAxis::LeftStickX, Positive))
+        .bind("down", KeyCode::ArrowDown)
+        .bind("down", KeyCode::KeyS)
+        .bind("down", GamepadButton::DPadDown)
+        .bind("down", Binding::Axis(GamepadAxis::LeftStickY, Negative))
+        .bind("jump", KeyCode::Space)
+        .bind("jump", KeyCode::ArrowUp)
+        .bind("jump", KeyCode::KeyW)
+        .bind("jump", GamepadButton::South)
+}
+
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
         LogCapture::start(CONSOLE_LINES);

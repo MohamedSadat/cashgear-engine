@@ -76,6 +76,8 @@ cargo run -p platformer_editor -- --demo             # a scripted session that e
 cargo run -p cg_editor -- --asset-root examples/scripting/assets maps/playground.tmx   # on its own: Play runs physics, animation and Lua
 ```
 
+Each [release](https://github.com/MohamedSadat/cashgear-engine/releases) has the standalone editor for Windows: `CashGear Editor.exe` in a zip with the scripting example's assets, which it opens on (given no file, it opens the first map in `assets/maps/`).
+
 Keys: W, E and R pick the move, rotate and resize tools; middle or right drag (or Space and drag) pans, the wheel zooms; Shift adds to the selection; arrows nudge (Shift: by a pixel); Ctrl turns snapping off while held; Delete, Ctrl+D, Ctrl+Z, Ctrl+Y, Ctrl+S; F5 plays and stops; F frames the selection. A game builds the editor in by adding `cg_editor::EditorPlugin` before its own plugins and reacting to `PlayStarted` and `PlayStopped` (see `games/platformer/editor`). `cargo test -p platformer_editor -- --ignored capture_editor` renders the editor to PNGs in `target/editor-captures/`.
 
 ## Examples
@@ -184,7 +186,7 @@ mdbook serve docs/book                                                     # the
 
 ### Releases
 
-`python tools/release.py bump X.Y.Z` sets the version everywhere it is named; write `CHANGELOG.md`'s section for it, commit, and push the tag `vX.Y.Z`. `.github/workflows/release.yml` then builds the platformer for Windows, the web and Android and publishes a GitHub Release with the changelog section as its notes. The engine is not on crates.io; games depend on it by git tag.
+`python tools/release.py bump X.Y.Z` sets the version everywhere it is named; write `CHANGELOG.md`'s section for it, commit, and push the tag `vX.Y.Z`. `.github/workflows/release.yml` then builds the platformer for Windows, the web and Android, and the scene editor for Windows, and publishes a GitHub Release with the changelog section as its notes. The engine is not on crates.io; games depend on it by git tag.
 
 ### Portability rules
 

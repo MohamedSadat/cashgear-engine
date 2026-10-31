@@ -9,9 +9,10 @@ use cashgear_engine::platform::input::{
     ButtonInput, InputPlugin, MouseButton, PointerId, Pointers,
 };
 use cashgear_engine::prelude::*;
+use cashgear_engine::script::ScriptPlugin;
 use cashgear_engine::tiled::TiledObject;
 use cashgear_engine::world::PrefabRegistry;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const TILESET: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <tileset version="1.10" tiledversion="1.10.2" name="tiles" tilewidth="8" tileheight="8" tilecount="4" columns="2">
@@ -101,9 +102,14 @@ impl Drop for Folder {
 
 /// The engine without a window, and the editor in its scene mode, opening `open`.
 fn app(folder: &Folder, open: &str) -> App {
+    app_in(&folder.0, open)
+}
+
+/// The same for the asset folder `root`.
+fn app_in(root: &Path, open: &str) -> App {
     let mut app = App::new();
     app.add_plugins(AssetPlugin {
-        root: Some(folder.0.to_string_lossy().into_owned()),
+        root: Some(root.to_string_lossy().into_owned()),
         hot_reload: Some(false),
         ..default()
     })
@@ -121,6 +127,10 @@ fn app(folder: &Folder, open: &str) -> App {
         ..default()
     })
     .add_plugins(UiPlugin::default())
+    .add_plugins(ScriptPlugin {
+        show_errors: false,
+        ..default()
+    })
     .add_plugins(EditorPlugin {
         load_prefabs: true,
         ..EditorPlugin::new(PlayMode::Scene).open(open)
@@ -305,6 +315,46 @@ fn play_runs_the_scene_and_stop_puts_it_back() {
     assert_eq!(play::entities(app.world_mut()).len(), before);
     assert!(app.world().resource::<Time>().fixed_paused());
     assert!(!editor(&mut app).document().unwrap().dirty());
+}
+
+/// The standalone editor's download: the scripting example's level, played without the
+/// example's Rust, with the editor's controls. Its Lua player runs right while the right
+/// arrow is held.
+#[test]
+fn the_scripting_example_plays_with_the_standalone_controls() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/scripting/assets");
+    let mut app = app_in(&root, "maps/playground.tmx");
+    app.insert_resource(crate::play_controls());
+    let player_x = |app: &mut App| {
+        let world = app.world_mut();
+        let mut query = world.query::<(&Name, &GlobalTransform2D)>();
+        query
+            .iter(world)
+            .find(|(name, _)| name.as_str() == "player")
+            .map(|(_, t)| t.translation().x)
+    };
+    for _ in 0..600 {
+        if player_x(&mut app).is_some() {
+            break;
+        }
+        frames(&mut app, 1);
+    }
+    assert!(
+        player_x(&mut app).is_some(),
+        "the map's player never spawned"
+    );
+
+    editor(&mut app).request_play();
+    // It lands at its start, then runs.
+    frames(&mut app, 60);
+    assert_eq!(editor(&mut app).mode, Mode::Playing);
+    let start = player_x(&mut app).expect("the player while playing");
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::ArrowRight);
+    frames(&mut app, 30);
+    let ran = player_x(&mut app).unwrap();
+    assert!(ran > start + 24.0, "the player ran from {start} to {ran}");
 }
 
 #[test]

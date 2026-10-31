@@ -981,6 +981,11 @@ Other choices made during the phase:
 - The release: the GitHub Release for `v0.1.0` has the Windows zip, the web zip, the Android APK and the AAB. Unzip the Windows build somewhere outside the repository and run `CashGear Platformer.exe` (SmartScreen will warn: the build is unsigned). Install the APK on your phone. Without the `CG_ANDROID_*` secrets the APK is the debug-signed one and the AAB is unsigned; add the secrets (see Phase 11) for Play-ready builds.
 - The Phase 11 device checks are still open: the platformer and the template on a real phone.
 
+### After the release
+
+- The scene editor ships for Windows from the next release on: the release workflow's Windows job also builds `cg_editor` (in its own build, so its engine features stay out of the game) and zips `CashGear Editor.exe` with the scripting example's assets, a README and the licenses. Given no file, the standalone editor opens the first map in `assets/maps/`; its Play binds `left`, `right`, `down` and `jump` (`cg_editor::play_controls`); Windows release builds open no console. The scripting example's player and goal scripts no longer need the example's `game` table, which the standalone editor's Play lacks (the player's script stopped with an error before). The `v0.1.0` release does not have the editor.
+- Verified: the workflow's zip step, run by hand outside the repository with a release build (a 9.9 MB zip); unzipped elsewhere and started from another folder with `--demo`, the editor found `assets` next to itself, opened `maps/playground.tmx` unasked, edited, saved into a scratch folder, played 121 steps with no script errors and exited with success. A new test, `the_scripting_example_plays_with_the_standalone_controls`, plays the example's level in the editor with its controls and holds the right arrow: the player runs. With the old `game.demo()` line it stays at x 81, so the test catches it. Not checked: the job on a GitHub runner (it runs on the next tag, or by hand), and playing the editor's level by keyboard in a window.
+
 ## Known issues
 
 - On the web, `AppExit` stops the loop but leaves the page; there is nowhere to exit to.

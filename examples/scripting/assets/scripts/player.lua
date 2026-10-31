@@ -119,7 +119,8 @@ function player.on_update(self, dt)
 
   if self.stunned <= 0 then
     local run, jump, held
-    if game.demo() then
+    -- `game` is the example's Rust; the standalone editor's Play has none.
+    if game and game.demo() then
       run, jump, held = bot(self, contacts)
     else
       run, jump, held = controls()

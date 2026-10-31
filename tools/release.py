@@ -7,7 +7,8 @@
 
 Releasing: bump, write the CHANGELOG section, commit, then tag `vX.Y.Z` and push the tag.
 The release workflow (.github/workflows/release.yml) builds the platformer for Windows, the
-web and Android and publishes them in a GitHub Release with these notes.
+web and Android, and the scene editor for Windows, and publishes them in a GitHub Release
+with these notes.
 """
 import datetime
 import re

@@ -7,8 +7,17 @@ before the first release one section per phase. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The release has the scene editor for Windows: `CashGear-Editor-<version>-windows.zip` holds `CashGear Editor.exe` and the scripting example's assets, so the editor runs without Rust installed. `--asset-root` points it at another folder.
+
+### Changed
+
+- The standalone editor (`cg_editor`) opens the first map in the asset folder's `maps/` when it is given no file, binds the actions `left`, `right`, `down` and `jump` for Play as the template does (`cg_editor::play_controls`), and opens no console window in Windows release builds.
+
 ### Fixed
 
+- The scripting example's player and goal scripts run without the example's Rust code (its `game` table), so its level plays in the standalone editor; before, the player's script stopped with an error at Play.
 - A game made from the template no longer shows three `error: invalid character ...` lines the first time Cargo resolves the engine: Cargo reads every manifest in a git dependency, and the template's manifests held cargo-generate placeholders. They are `Cargo.toml.liquid` files now, which cargo-generate renders into `Cargo.toml`. (Builds worked before; the lines were only alarming.)
 
 ## [0.1.0] — 2026-10-31

@@ -28,6 +28,6 @@ The engine is one version for all its crates, following semantic versioning from
 2. Write that section of `CHANGELOG.md`; it becomes the release notes.
 3. Commit, then tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
 
-The tag starts `.github/workflows/release.yml`. It checks that the tag, the workspace version, the template and the changelog agree (`tools/release.py check`), builds the sample platformer for Windows (a zip), the web (a zip for itch.io or any host) and Android (an APK and an AAB, signed when the repository has the `CG_ANDROID_*` secrets), and publishes a GitHub Release with the notes. Running the workflow by hand builds everything without publishing.
+The tag starts `.github/workflows/release.yml`. It checks that the tag, the workspace version, the template and the changelog agree (`tools/release.py check`), builds the sample platformer for Windows (a zip), the web (a zip for itch.io or any host) and Android (an APK and an AAB, signed when the repository has the `CG_ANDROID_*` secrets), builds the scene editor for Windows (a zip with the scripting example's assets), and publishes a GitHub Release with the notes. Running the workflow by hand builds everything without publishing.
 
 The engine is not on crates.io; games depend on it through git and a tag.
