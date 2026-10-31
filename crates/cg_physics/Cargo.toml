@@ -18,6 +18,7 @@ cg_render.workspace = true
 cg_tiled.workspace = true
 cg_world.workspace = true
 log.workspace = true
+profiling.workspace = true
 serde.workspace = true
 
 [lints]

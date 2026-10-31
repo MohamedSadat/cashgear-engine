@@ -62,6 +62,7 @@ type Hit = (
 /// Hit tests the pointers against the UI and updates [`Interaction`]s, sliders and focus.
 /// Runs in `PreUpdate` after the actions.
 #[allow(clippy::too_many_arguments)]
+#[profiling::function]
 pub(crate) fn interact(
     pointers: Res<Pointers>,
     window: Res<Window>,
@@ -174,6 +175,7 @@ pub(crate) fn interact(
 }
 
 /// Sets each widget's [`Interaction`] from the pointers and the focus. Runs after both.
+#[profiling::function]
 pub(crate) fn update_interactions(
     ui_pointer: Res<UiPointer>,
     focus: Res<UiFocus>,

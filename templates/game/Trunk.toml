@@ -1,0 +1,13 @@
+# The web build.
+#
+# - `trunk serve`: a debug build; the engine fetches asset files one by one.
+# - `trunk build --release --no-default-features --public-url ./`: the web release. The
+#   `web-release` profile and wasm-opt make the code small, `--no-default-features` leaves
+#   out the debug overlay, and the hook below packs the assets into one bundle.
+
+[[hooks]]
+# Release builds: pack assets/ into assets.cgpak next to index.html and remove the loose
+# copy. Debug builds keep the loose files. Needs cg_pack (see README.md).
+stage = "post_build"
+command = "cg_pack"
+command_arguments = ["trunk-bundle"]

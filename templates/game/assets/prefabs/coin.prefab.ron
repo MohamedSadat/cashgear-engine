@@ -1,0 +1,7 @@
+// What every `Coin` tile object in the map gets, by its class: the bobbing script. The
+// tile's own properties give it its sensor.
+(
+    components: {
+        "Script": "scripts/coin.lua",
+    },
+)

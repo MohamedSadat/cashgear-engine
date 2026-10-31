@@ -161,6 +161,7 @@ impl Plugin for AssetPlugin {
     }
 }
 
+#[profiling::function]
 fn update_assets(world: &mut World) {
     if let Some(server) = world.get_resource::<AssetServer>().cloned() {
         server.update(world);

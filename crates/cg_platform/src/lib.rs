@@ -23,6 +23,29 @@
 //! On Android the `android` module (built for Android only) takes the app from the
 //! entry point (`cashgear_engine::android_main!`) and reads what the engine's Java
 //! activity, `CashGearActivity`, records: back presses and the display cutout's safe area.
+//!
+//! Games read input as named actions, bound to keys, buttons and touch:
+//!
+//! ```
+//! use cg_core::prelude::*;
+//! use cg_platform::input::{ActionMap, ActionState, GamepadButton, InputPlugin, KeyCode};
+//!
+//! fn jump(actions: Res<ActionState>) {
+//!     if actions.just_pressed("jump") {
+//!         info!("jump!");
+//!     }
+//! }
+//!
+//! App::new()
+//!     .add_plugins(InputPlugin { gamepads: false })
+//!     .insert_resource(
+//!         ActionMap::new()
+//!             .bind("jump", KeyCode::Space)
+//!             .bind("jump", GamepadButton::South),
+//!     )
+//!     .add_systems(FixedUpdate, jump)
+//!     .run();
+//! ```
 
 #[cfg(target_os = "android")]
 pub mod android;

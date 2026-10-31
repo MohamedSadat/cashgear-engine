@@ -212,6 +212,7 @@ pub struct TransformPropagation {
 
 /// Recomputes [`GlobalTransform2D`] for every entity whose transform, parent or ancestors
 /// changed since transforms were last propagated.
+#[profiling::function]
 pub fn propagate_transforms(
     mut roots: Query<Root, Without<ChildOf>>,
     mut nodes: Query<Node>,

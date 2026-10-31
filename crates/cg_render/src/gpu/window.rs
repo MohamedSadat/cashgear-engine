@@ -153,7 +153,12 @@ impl Gpu {
         };
 
         let mut reconfigure = false;
-        let frame = match surface.get_current_texture() {
+        // With vsync, the wait for the next frame is usually here.
+        let acquired = {
+            profiling::scope!("acquire frame");
+            surface.get_current_texture()
+        };
+        let frame = match acquired {
             wgpu::CurrentSurfaceTexture::Success(frame) => frame,
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
                 reconfigure = true;
@@ -183,6 +188,7 @@ impl Gpu {
         let stats = self
             .painter
             .render(&self.device, &self.queue, &view, size, input, overlays);
+        profiling::scope!("present");
         handle.winit().pre_present_notify();
         self.queue.present(frame);
         if reconfigure {
@@ -285,6 +291,7 @@ async fn init(handle: WindowHandle, settings: RenderPlugin) -> Result<Gpu, Rende
 
 /// Draws the queued sprites and debug shapes into the window, then empties the queues.
 #[allow(clippy::too_many_arguments)]
+#[profiling::function]
 pub(crate) fn render(
     mut renderer: ResMut<WindowRenderer>,
     window: Res<Window>,

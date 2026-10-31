@@ -935,3 +935,71 @@ fn the_debug_overlay_opens_with_its_key_and_builds_its_windows() {
     frame(&mut app);
     assert_eq!(app.world().resource::<DebugOverlay>().selected, None);
 }
+
+#[cfg(all(feature = "debug-overlay", feature = "profile"))]
+#[test]
+fn the_profiler_window_records_the_engines_scopes() {
+    let mut app = app_with(UiPlugin {
+        profiler_open: true,
+        overlay_open: true,
+        ..UiPlugin::default()
+    });
+    app.world_mut()
+        .spawn((Node::sized(40.0, 20.0), Text::new("profiled")));
+    // The window starts recording when it opens; the overlay draws it from the second frame.
+    for _ in 0..4 {
+        frame(&mut app);
+    }
+    assert!(cg_core::profile::is_recording());
+    let (frames, found) = app
+        .world()
+        .resource::<crate::profiler::ProfilerView>()
+        .recorded("layout_ui");
+    assert!(frames >= 2, "{frames} frames recorded");
+    assert!(found, "no scope named after the layout system");
+}
+
+/// Renders the overlay with the Profiler window open, after frames with some UI work, to
+/// `target/ui-captures/profiler.png`: `cargo test -p cg_ui --features profile -- --ignored
+/// capture_profiler`.
+#[cfg(all(feature = "debug-overlay", feature = "profile"))]
+#[test]
+#[ignore = "needs a GPU; writes a PNG for people to look at"]
+#[allow(clippy::disallowed_methods)]
+fn capture_profiler() {
+    use cg_render::{CameraView, DebugShapes, OffscreenFrame, OffscreenRenderer, RenderOverlays};
+    let mut renderer = pollster::block_on(OffscreenRenderer::new()).expect("a GPU");
+    let mut app = app_with(UiPlugin {
+        profiler_open: true,
+        overlay_open: true,
+        ..UiPlugin::default()
+    });
+    for i in 0..60 {
+        app.world_mut()
+            .spawn((Node::sized(40.0, 20.0), Text::new(format!("label {i}"))));
+    }
+    // Choose a frame to look at: the window follows the latest otherwise.
+    for _ in 0..30 {
+        frame(&mut app);
+    }
+    let world = app.world_mut();
+    let window = world.resource::<Window>().clone();
+    let mut overlays = world.remove_resource::<RenderOverlays>().unwrap();
+    let image = renderer
+        .render_frame(
+            OffscreenFrame {
+                size: window.physical_size(),
+                scale_factor: window.scale_factor() as f32,
+                area: Some(window.safe_area()),
+            },
+            &CameraView::default(),
+            world.resource::<Assets<Image>>(),
+            &Sprites::default(),
+            &DebugShapes::default(),
+            Some(&mut overlays),
+        )
+        .unwrap();
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/ui-captures");
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(format!("{dir}/profiler.png"), image.to_png().unwrap()).unwrap();
+}

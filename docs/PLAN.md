@@ -34,7 +34,9 @@ CashGear Engine is a Rust 2D game engine for desktop, web and Android, proven by
 | Data files | `serde` + `ron` | Prefabs, scenes, settings |
 | Scripting | `mlua` (Lua 5.4, sources compiled in) | Chosen in phase 12: desktop and Android; web builds stay Rust-only |
 | Scene editor | own `cg_editor` (egui panels, serde-driven inspector) | Chosen in phase 13: edits Tiled object layers in place and RON prefabs; a library games build in for play-in-editor |
-| Profiling | `puffin` (+ Tracy optional) |  |
+| Profiling | `profiling` crate scopes: `puffin` (feature `profile`) or Tracy (`profile-tracy`) | Chosen in phase 14: puffin's frames show in the F12 overlay's Profiler window on every target |
+| Benchmarks | `criterion` (dev only) and a counting allocator | Chosen in phase 14: `cg_bench` times frames (reported in CI) and requires allocation-free steady frames |
+| Game template and guide | `cargo-generate`, `mdbook` | Chosen in phase 14: `templates/game` and `docs/book`, the guide published on GitHub Pages |
 | Web tooling | `trunk`, `wasm-bindgen`, `wasm-opt` |  |
 | Android tooling | `cargo-ndk` + Gradle (Android Gradle plugin) | Chosen in phase 11: `cargo-apk` is deprecated and `xbuild` unmaintained |
 | Logging / errors | `log`, `env_logger`, `console_log`, `thiserror`, `anyhow` |  |
@@ -99,7 +101,9 @@ The engine is one Cargo workspace of small crates behind a single facade crate, 
 | `games/platformer` | Sample game proving the engine | 9 |
 | `tools/cg_editor` | Desktop scene editor (a library games build in, and a binary) | 13 |
 | `tools/cg_pack` | CLI: atlas packing, asset bundling | 4 |
-| `docs/` | `PLAN.md`, `PROGRESS.md`, mdBook guide | 0 |
+| `templates/game` | `cargo generate` template for a new game | 14 |
+| `benches` | `cg_bench`: frame benchmarks and the allocation check | 14 |
+| `docs/` | `PLAN.md`, `PROGRESS.md`, mdBook guide (`docs/book`, phase 14) | 0 |
 
 ### Portability rules (apply from phase 1)
 
@@ -346,6 +350,23 @@ These phases add tools for faster content work and finish the engine as a reusab
 **Ask:** publish to crates.io or keep private; release targets for the sample game; versioning scheme (0.1.0 start).
 
 **Done when:** a new game can be created from the template and run on desktop, web and Android by following the guide.
+
+## After 0.1.0
+
+The fifteen phases above are done; 0.1.0 is released. Work continues in the same way, one phase per session, each ending with a push, a tag and the next card.
+
+### Phase 15 — Field testing and 0.2
+
+**Goal:** the engine proven on the devices and browsers it claims, and the most-wanted backlog items in, released as 0.2.0.
+
+- Run the platformer and a game made from the template on a real Android phone (the open Phase 11 checks: lifecycle, audio with headphones and calls, back, cutouts, touch) and fix what fails.
+- Firefox and Safari (desktop and iPhone), with a gamepad; WebGL2 frame times with many sprites in a release build.
+- Take the backlog items the testing or the user asks for first. Candidates: a content-hashed web bundle name and a service worker, Play Store extras (debug symbols, an icon foreground, a signed release from CI), loading and stream decoding on a worker thread on desktop, Android gamepads, UI scroll panels and text fields.
+- Release 0.2.0 with `tools/release.py` and the release workflow.
+
+**Ask:** which devices and browsers are available; which backlog items matter most; whether 0.2 may break the 0.1 API.
+
+**Done when:** the device checklist passes on a phone, the chosen backlog items are in, and v0.2.0 is released.
 
 ## Quality and risks
 

@@ -379,6 +379,7 @@ type LookItem = (
 type WithLook = Or<(With<StateColors>, With<StateImages>)>;
 
 /// Shows widgets' states through their [`StateColors`] and [`StateImages`].
+#[profiling::function]
 pub(crate) fn apply_state_looks(mut widgets: Query<LookItem, WithLook>) {
     for (interaction, button, colors, sources, background, image) in &mut widgets {
         let state = match (button.is_some_and(|b| b.disabled), interaction) {
@@ -410,6 +411,7 @@ pub(crate) fn apply_state_looks(mut widgets: Query<LookItem, WithLook>) {
 }
 
 /// Sizes bar fills and places slider thumbs from their parents' values.
+#[profiling::function]
 pub(crate) fn update_bars(
     sliders: Query<(Ref<Slider>, &Children)>,
     bars: Query<(Ref<ProgressBar>, &Children)>,

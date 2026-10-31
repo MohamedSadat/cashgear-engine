@@ -22,6 +22,10 @@ jobs:
         with:
           cache: false
       - run: cargo fmt --all --check
+      - name: the version, the template's engine tag and the changelog agree
+        run: |
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          python3 tools/release.py check "v$version"
 
   check:
     name: clippy, test, wasm (${{ matrix.os }})
@@ -152,11 +156,6 @@ jobs:
         with:
           name: platformer-web
           path: games/platformer/dist/
-      - name: pages artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-pages-artifact@v5
-        with:
-          path: games/platformer/dist/
 
   android:
     name: android build
@@ -223,11 +222,97 @@ jobs:
             games/platformer/android/app/build/outputs/apk/debug/*.apk
             games/platformer/android/app/build/outputs/bundle/release/*.aab
 
+  template:
+    name: game template
+    # Makes a game from templates/game as `cargo generate` would, points it at this
+    # checkout instead of the release tag, and checks it like the template's own CI:
+    # formatting, lints, the bot test and the web build.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux packages
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-generate
+      - name: generate a game
+        run: |
+          cargo generate --path templates/game --name ci-game --destination "$RUNNER_TEMP" \
+            -d title="CI Game" -d app_id=com.example.cigame --silent --vcs none
+          cd "$RUNNER_TEMP/ci-game"
+          sed -i -E \
+            -e "s#^cashgear_engine = \{ git = \"[^\"]+\", tag = \"[^\"]+\"#cashgear_engine = { path = \"$GITHUB_WORKSPACE/crates/cashgear_engine\"#" \
+            -e "s#^cg_editor = \{ git = \"[^\"]+\", tag = \"[^\"]+\" \}#cg_editor = { path = \"$GITHUB_WORKSPACE/tools/cg_editor\" }#" \
+            Cargo.toml
+          grep -n "^cashgear_engine = \|^cg_editor = " Cargo.toml
+      - name: check it
+        working-directory: ${{ runner.temp }}/ci-game
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+          cargo check --target wasm32-unknown-unknown -p ci_game --no-default-features
+
+  bench:
+    name: benchmarks
+    # One frame of each cg_bench scene, timed; the table goes in the run's summary. Shared
+    # runners are noisy, so the times are reported, not judged.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux packages
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - run: cargo bench -p cg_bench --bench frames -- --noplot
+      - run: python3 benches/report.py target/criterion >> "$GITHUB_STEP_SUMMARY"
+
+  docs:
+    name: guide and API docs
+    # The site GitHub Pages serves: the platformer's web release at the root, the mdBook
+    # guide under book/ and the API docs under api/.
+    needs: web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux packages
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook@0.5.4
+      - name: API docs
+        # Broken links in the docs fail the job.
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: >-
+          cargo doc --no-deps --features cashgear_engine/script
+          -p cashgear_engine -p cg_core -p cg_platform -p cg_render -p cg_world -p cg_assets
+          -p cg_tiled -p cg_physics -p cg_anim -p cg_audio -p cg_ui -p cg_script -p cg_editor
+      - name: the guide
+        run: mdbook build docs/book
+      - uses: actions/download-artifact@v8
+        with:
+          name: platformer-web
+          path: site
+      - name: assemble the site
+        run: |
+          rm -f site/.trunk-lock
+          cp -r docs/book/book site/book
+          cp -r target/doc site/api
+          printf '%s\n' '<!doctype html><meta charset="utf-8"><title>CashGear Engine API</title><meta http-equiv="refresh" content="0; url=cashgear_engine/index.html"><a href="cashgear_engine/index.html">CashGear Engine API</a>' > site/api/index.html
+          du -sh site site/book site/api
+      - name: pages artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site/
+
   pages:
     name: deploy to GitHub Pages
     # Only a green main is published.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [fmt, check, web, android]
+    needs: [fmt, check, web, android, template, docs]
 
     runs-on: ubuntu-latest
     permissions:

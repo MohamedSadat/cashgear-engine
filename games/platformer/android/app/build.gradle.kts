@@ -27,6 +27,14 @@ fun signing(key: String, env: String): String? =
 
 val releaseStore = signing("storeFile", "CG_ANDROID_KEYSTORE")
 
+// The version: `-PversionName=1.2.3` (the release workflow passes the tag's) sets both;
+// Google Play needs the code to grow with every upload (1.2.3 is 10203).
+val appVersion = (project.findProperty("versionName") as String?) ?: "0.1.0"
+val appVersionCode = appVersion.split('.').map { it.toIntOrNull() ?: 0 }
+    .let { (it + listOf(0, 0, 0)).take(3) }
+    .let { (major, minor, patch) -> major * 10000 + minor * 100 + patch }
+    .coerceAtLeast(1)
+
 android {
     namespace = "com.cashgear.platformer"
     compileSdk = 36
@@ -36,8 +44,8 @@ android {
         applicationId = "com.cashgear.platformer"
         minSdk = minApiLevel
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersionCode
+        versionName = appVersion
     }
 
     signingConfigs {

@@ -69,6 +69,7 @@ type ColliderItem = (
 
 /// Draws the visible tiles and colliders when [`PhysicsDebug`] is enabled.
 #[allow(clippy::too_many_arguments)]
+#[profiling::function]
 pub(crate) fn draw_debug(
     debug: Res<PhysicsDebug>,
     shapes: Option<ResMut<DebugShapes>>,

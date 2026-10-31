@@ -142,6 +142,7 @@ fn clamp_view(position: Vec2, size: Vec2, bounds: Rect) -> Vec2 {
 }
 
 /// Moves each [`CameraFollow`] camera for one fixed step.
+#[profiling::function]
 pub(crate) fn follow_targets(
     time: Res<Time>,
     window: Option<Res<Window>>,

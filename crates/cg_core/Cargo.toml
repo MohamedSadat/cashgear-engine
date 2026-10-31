@@ -8,11 +8,24 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# Profiling with puffin: the engine's scopes are recorded (while recording is on) and the
+# debug overlay's Profiler window shows them. See `cg_core::profile`.
+profile = ["dep:puffin", "profiling/profile-with-puffin"]
+# Profiling with Tracy (desktop): connect the Tracy profiler while the game runs.
+profile-tracy = ["profiling/profile-with-tracy"]
+
 [dependencies]
 bevy_ecs.workspace = true
 glam = { workspace = true, features = ["serde"] }
 log.workspace = true
+profiling.workspace = true
+puffin = { workspace = true, optional = true }
 serde.workspace = true
+
+# puffin's clock on the web.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+puffin = { workspace = true, optional = true, features = ["web"] }
 
 [lints]
 workspace = true

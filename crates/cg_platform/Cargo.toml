@@ -16,6 +16,7 @@ gilrs.workspace = true
 glam = { workspace = true, features = ["serde"] }
 log.workspace = true
 miniz_oxide.workspace = true
+profiling.workspace = true
 serde.workspace = true
 web-time.workspace = true
 winit = { workspace = true, features = ["serde"] }

@@ -54,6 +54,7 @@ impl PrefabFiles {
 }
 
 /// Copies new and changed prefab files into [`Prefabs`].
+#[profiling::function]
 pub(crate) fn sync_prefab_files(
     mut files: ResMut<PrefabFiles>,
     sources: Res<Assets<PrefabSource>>,

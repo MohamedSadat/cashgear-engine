@@ -6,7 +6,7 @@ use crate::events::{CollisionEnded, CollisionStarted, Overlaps};
 use crate::grid::TileCollider;
 use crate::layers::CollisionLayers;
 use crate::shape::{Collider, OneWay, Sensor};
-use crate::world::{Entry, Env, GridEntry, PhysicsWorld};
+use crate::world::{Entry, Env, GridEntry, Pair, PhysicsWorld};
 use bevy_ecs::prelude::*;
 use cg_core::Time;
 use cg_core::glam::Vec2;
@@ -33,6 +33,7 @@ type BodyItem = (
 );
 
 /// Records every collider and tile grid where it is now, and rebuilds the spatial hash.
+#[profiling::function]
 pub(crate) fn prepare(
     mut world: ResMut<PhysicsWorld>,
     colliders: Query<ColliderItem>,
@@ -66,6 +67,7 @@ pub(crate) fn prepare(
 }
 
 /// Moves every kinematic body through the level.
+#[profiling::function]
 pub(crate) fn move_bodies(
     time: Res<Time>,
     gravity: Res<Gravity>,
@@ -99,24 +101,46 @@ pub(crate) fn move_bodies(
     }
 }
 
+/// The overlap check's lists, kept between steps for their memory.
+#[derive(Default)]
+pub(crate) struct DetectBuffers {
+    pairs: Vec<Pair>,
+    began: Vec<Pair>,
+    stopped: Vec<Pair>,
+}
+
 /// Updates the bodies' shapes after moving them and reports overlaps that started or
 /// ended.
+#[profiling::function]
 pub(crate) fn detect(
     mut world: ResMut<PhysicsWorld>,
     bodies: Query<(Entity, &Collider, &GlobalTransform2D), With<KinematicBody>>,
     mut overlaps: ResMut<Overlaps>,
     mut started: MessageWriter<CollisionStarted>,
     mut ended: MessageWriter<CollisionEnded>,
+    mut buffers: Local<DetectBuffers>,
 ) {
     for (entity, collider, global) in &bodies {
         world.move_body(entity, collider.world_shape(global.0));
     }
     world.rebuild();
-    let (began, stopped) = overlaps.replace(world.overlapping_pairs());
-    for pair in stopped {
+    let DetectBuffers {
+        pairs,
+        began,
+        stopped,
+    } = &mut *buffers;
+    world.overlapping_pairs(pairs);
+    // Writing to `Overlaps` only when something changed keeps change detection quiet.
+    if *pairs != overlaps.pairs() {
+        overlaps.replace(pairs, began, stopped);
+    } else {
+        began.clear();
+        stopped.clear();
+    }
+    for pair in stopped.iter() {
         ended.write(CollisionEnded(pair.0, pair.1));
     }
-    for pair in began {
+    for pair in began.iter() {
         started.write(CollisionStarted(pair.0, pair.1));
     }
 }

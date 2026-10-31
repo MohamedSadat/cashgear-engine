@@ -2,7 +2,19 @@
 
 CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WASM) and Android, built with `winit`, `wgpu` and `bevy_ecs`. A sample platformer (`games/platformer`) proves it. The engine is built in 15 phases; see [docs/PLAN.md](docs/PLAN.md) for the plan and [docs/PROGRESS.md](docs/PROGRESS.md) for where it stands.
 
-> **Status:** Phase 13. `cg_core` (app, plugins, fixed-timestep loop, `Time`, schedules), `cg_platform` (window, fullscreen, input, actions, lifecycle, logging, asset IO and bundles, save storage), `cg_render` (`wgpu` sprites with hit flashes, camera, virtual resolutions, debug shapes, culling, image and atlas assets), `cg_world` (transforms and hierarchy, interpolation, a game-state stack, RON prefabs), `cg_assets` (handles, background loading, loading states, hot reload), `cg_tiled` (Tiled maps with parallax, chunked tiles, tile animations and object prefabs), `cg_physics` (kinematic bodies with slopes, one-way platforms and moving platforms, tile and entity colliders, sensors, layers, raycasts) and `cg_anim` (Aseprite sprite sheets, animation state machines and events, tweens, CPU particles, camera follow, shake and fades) `cg_audio` (OGG and WAV sounds, streamed music with crossfades, buses with saved volume settings, positional sound) and `cg_ui` (shaped text in TTF, OTF and bitmap fonts with Arabic and right-to-left layouts, nodes with anchors, rows and columns, buttons, sliders and progress bars, keyboard, gamepad, mouse and touch navigation, on-screen touch controls, localization, and an egui debug overlay) work on desktop, web and Android, and `cg_script` runs gameplay written in Lua 5.4, reloaded while the game runs, on desktop and Android. `tools/cg_editor`, a desktop scene editor, places and tunes a level's entities in Tiled maps and prefabs, with undo and play-in-editor. The platformer sample game (`games/platformer`) plays through three levels everywhere; its walkers and checkpoints are Lua scripts where Lua runs and Rust on the web. CI publishes the platformer's web release to <https://mohamedsadat.github.io/cashgear-engine/>.
+> **Status:** version 0.1.0, the first release, after the 15 phases of [docs/PLAN.md](docs/PLAN.md). The engine runs games on Windows, Linux, macOS, the web (WebGPU or WebGL2) and Android: a fixed-step game loop, `wgpu` sprite batching with pixel-perfect scaling, entities and prefabs (`bevy_ecs`), background asset loading with hot reload, Tiled maps, platformer physics, Aseprite animation, tweens and particles, audio, text and UI with right-to-left languages and touch controls, Lua 5.4 scripting (desktop and Android), a scene editor, profiling and benchmarks. The guide is at <https://mohamedsadat.github.io/cashgear-engine/book/>, the API docs at <https://mohamedsadat.github.io/cashgear-engine/api/>, and the sample platformer plays at <https://mohamedsadat.github.io/cashgear-engine/>.
+
+## Start a game
+
+```sh
+cargo install cargo-generate --locked
+cargo install --git https://github.com/MohamedSadat/cashgear-engine --tag v0.1.0 cg_pack
+cargo generate --git https://github.com/MohamedSadat/cashgear-engine templates/game --tag v0.1.0 --name my-game
+cd my-game
+cargo run
+```
+
+The template (`templates/game`) is a small complete game: a title screen, a Tiled level, an animated character that runs and jumps, coins, a win screen, touch controls, a Lua script, a bot that plays it and a test, with its web page, its Android project and the scene editor built in. [Getting started](https://mohamedsadat.github.io/cashgear-engine/book/getting-started.html) in the guide covers the tools for the web and Android.
 
 ## Workspace layout
 
@@ -25,6 +37,10 @@ CashGear Engine is a Rust 2D game engine for Windows, Linux, macOS, the web (WAS
 | `tools/cg_editor` | Desktop scene editor (a library games build in, and a binary) | 13 |
 | `games/platformer/editor` | The platformer with the editor built in | 13 |
 | `examples/` | One runnable example per feature | from 1 |
+| `templates/game` | The `cargo generate` template for a new game | 14 |
+| `benches` | `cg_bench`: frame benchmarks and the allocation check | 14 |
+| `docs/book` | The mdBook guide | 14 |
+| `tools/release.py` | Release chores: version bump, tag check, release notes | 14 |
 
 ## The sample game
 
@@ -154,6 +170,21 @@ CG_UPDATE_GOLDEN=1 cargo test -p cg_ui --test golden
 ```
 
 `cargo test -p ui -- --ignored capture_screens` renders each screen of the `ui` example's bot run to PNGs in `target/ui-captures/`, for looking at the UI without a window.
+
+### Profiling and benchmarks
+
+```sh
+cargo run -p platformer --features cashgear_engine/profile -- --profile   # the F12 overlay's Profiler window
+cargo bench -p cg_bench                                                    # one frame of each benchmark scene
+cargo test -p cg_bench --test allocations                                  # steady frames make no heap allocations
+mdbook serve docs/book                                                     # the guide, at http://localhost:3000
+```
+
+`--features cashgear_engine/profile-tracy` sends the profiling scopes to Tracy instead. CI posts the benchmark table in each run's summary.
+
+### Releases
+
+`python tools/release.py bump X.Y.Z` sets the version everywhere it is named; write `CHANGELOG.md`'s section for it, commit, and push the tag `vX.Y.Z`. `.github/workflows/release.yml` then builds the platformer for Windows, the web and Android and publishes a GitHub Release with the changelog section as its notes. The engine is not on crates.io; games depend on it by git tag.
 
 ### Portability rules
 

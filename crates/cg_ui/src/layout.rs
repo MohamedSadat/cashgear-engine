@@ -58,18 +58,31 @@ pub(crate) struct LayoutParams<'w, 's> {
     stack: ResMut<'w, UiStack>,
 }
 
+/// The layout's lists, kept from frame to frame so a steady UI allocates nothing.
+#[derive(Default)]
+pub(crate) struct Scratch {
+    roots: Vec<Entity>,
+    /// Visible nodes with their layer and order.
+    stack: Vec<(i32, u32, Entity)>,
+    /// Nodes with text, their content box and direction, shaped after the pass.
+    texts: Vec<(Entity, Rect, bool)>,
+    /// Children lists and main-axis sizes, lent to one node at a time down the tree.
+    lists: Vec<Vec<Entity>>,
+    sizes: Vec<Vec<Option<f32>>>,
+}
+
 /// One pass over the tree.
 struct Pass<'p, 'w, 's> {
     params: &'p mut LayoutParams<'w, 's>,
+    scratch: &'p mut Scratch,
     scale: f32,
     order: u32,
-    stack: Vec<(i32, u32, Entity)>,
-    texts: Vec<(Entity, Rect, bool)>,
     touch_visible: bool,
 }
 
 /// Lays out the UI: runs in `PostUpdate`.
-pub(crate) fn layout_ui(mut params: LayoutParams) {
+#[profiling::function]
+pub(crate) fn layout_ui(mut params: LayoutParams, mut scratch: Local<Scratch>) {
     params.text_system.sync_fonts(&params.fonts);
     let space = params.camera.screen_space();
     let revision = params.text_system.revision();
@@ -81,34 +94,42 @@ pub(crate) fn layout_ui(mut params: LayoutParams) {
     let rtl = params.locale.as_ref().is_some_and(|l| l.is_rtl());
     let touch_visible = params.touch.as_ref().is_none_or(|t| t.visible());
 
-    let mut roots: Vec<Entity> = params
-        .candidates
-        .iter()
-        .filter(|(_, parent)| parent.is_none_or(|p| !params.nodes.contains(p.parent())))
-        .map(|(entity, _)| entity)
-        .collect();
-    roots.sort_by_key(|e| (e.index_u32(), e.generation().to_bits()));
+    let scratch = &mut *scratch;
+    let mut roots = core::mem::take(&mut scratch.roots);
+    roots.clear();
+    roots.extend(
+        params
+            .candidates
+            .iter()
+            .filter(|(_, parent)| parent.is_none_or(|p| !params.nodes.contains(p.parent())))
+            .map(|(entity, _)| entity),
+    );
+    // Unstable sorts allocate nothing, and the keys are unique.
+    roots.sort_unstable_by_key(|e| (e.index_u32(), e.generation().to_bits()));
+    scratch.stack.clear();
+    scratch.texts.clear();
 
     let mut pass = Pass {
         params: &mut params,
+        scratch,
         scale: space.scale.max(f32::EPSILON),
         order: 0,
-        stack: Vec::new(),
-        texts: Vec::new(),
         touch_visible,
     };
     let screen = space.rect();
-    for root in roots {
+    for &root in &roots {
         pass.place_free(root, screen, rtl, 0, true);
     }
-    let Pass {
-        mut stack, texts, ..
-    } = pass;
-    for (entity, content, rtl) in texts {
+    scratch.roots = roots;
+    for &(entity, content, rtl) in &scratch.texts {
         params.shape_text(entity, content, rtl, space.scale);
     }
-    stack.sort_by_key(|(layer, order, _)| (*layer, *order));
-    params.stack.entities = stack.into_iter().map(|(_, _, e)| e).collect();
+    scratch
+        .stack
+        .sort_unstable_by_key(|(layer, order, _)| (*layer, *order));
+    let entities = &mut params.stack.entities;
+    entities.clear();
+    entities.extend(scratch.stack.iter().map(|(_, _, e)| *e));
     params.stack.space = space;
 }
 
@@ -234,7 +255,8 @@ impl Pass<'_, '_, '_> {
             return Vec2::ZERO;
         };
         let node = node.clone();
-        let children: Vec<Entity> = children.map(|c| c.iter().collect()).unwrap_or_default();
+        let mut list = self.scratch.lists.pop().unwrap_or_default();
+        list.extend(children.into_iter().flat_map(|c| c.iter()));
         let image_size = image.filter(|i| i.slice.is_none()).and_then(|image| {
             image.source.map(|s| s.size().abs()).or_else(|| {
                 self.params
@@ -250,9 +272,9 @@ impl Pass<'_, '_, '_> {
         if has_text {
             size = size.max(self.text_size(entity, inner.x));
         }
-        let gaps = node.gap * children.len().saturating_sub(1) as f32;
+        let gaps = node.gap * list.len().saturating_sub(1) as f32;
         let mut along = Vec2::ZERO;
-        for &child in &children {
+        for &child in &list {
             let child_size = self.outer_size(child, inner);
             match node.layout {
                 Layout::Free => {
@@ -278,6 +300,8 @@ impl Pass<'_, '_, '_> {
             Layout::Row => size = size.max(along + Vec2::new(gaps, 0.0)),
             Layout::Column => size = size.max(along + Vec2::new(0.0, gaps)),
         }
+        list.clear();
+        self.scratch.lists.push(list);
         size + insets
     }
 
@@ -348,7 +372,8 @@ impl Pass<'_, '_, '_> {
             return;
         };
         let node = node.clone();
-        let children: Vec<Entity> = children.map(|c| c.iter().collect()).unwrap_or_default();
+        let mut list = self.scratch.lists.pop().unwrap_or_default();
+        list.extend(children.into_iter().flat_map(|c| c.iter()));
         let layer = z.map_or(layer, |z| z.0);
         let visible =
             visible && inherited.is_none_or(|v| v.get()) && (!touch_control || self.touch_visible);
@@ -384,22 +409,24 @@ impl Pass<'_, '_, '_> {
             }
         }
         if visible {
-            self.stack.push((layer, order, entity));
+            self.scratch.stack.push((layer, order, entity));
         }
         if has_text {
-            self.texts.push((entity, content, rtl));
+            self.scratch.texts.push((entity, content, rtl));
         }
 
         match node.layout {
             Layout::Free => {
-                for child in children {
+                for &child in &list {
                     self.place_free(child, content, rtl, layer, visible);
                 }
             }
             Layout::Row | Layout::Column => {
-                self.place_line(&node, &children, content, rtl, layer, visible);
+                self.place_line(&node, &list, content, rtl, layer, visible);
             }
         }
+        list.clear();
+        self.scratch.lists.push(list);
     }
 
     /// Places the children of a row or column.
@@ -418,7 +445,8 @@ impl Pass<'_, '_, '_> {
         let (main_total, cross_total) = (main_of(content.size()), cross_of(content.size()));
 
         // Main-axis sizes; `Fill` children share what is left.
-        let mut mains = Vec::with_capacity(children.len());
+        let mut mains = self.scratch.sizes.pop().unwrap_or_default();
+        mains.clear();
         let mut fills = 0;
         for &child in children {
             let Ok((n, ..)) = self.params.nodes.get(child) else {
@@ -446,8 +474,7 @@ impl Pass<'_, '_, '_> {
         } else {
             0.0
         };
-        let mains: Vec<f32> = mains.into_iter().map(|m| m.unwrap_or(share)).collect();
-        let used: f32 = mains.iter().sum::<f32>() + gaps;
+        let used: f32 = mains.iter().map(|m| m.unwrap_or(share)).sum::<f32>() + gaps;
         let free = (main_total - used).max(0.0);
         let (mut cursor, extra) = match node.justify {
             Justify::Start => (0.0, 0.0),
@@ -459,7 +486,8 @@ impl Pass<'_, '_, '_> {
             Justify::SpaceBetween => (0.0, 0.0),
         };
 
-        for (&child, &main) in children.iter().zip(&mains) {
+        for (&child, main) in children.iter().zip(&mains) {
+            let main = main.unwrap_or(share);
             let Ok((n, ..)) = self.params.nodes.get(child) else {
                 continue;
             };
@@ -507,5 +535,6 @@ impl Pass<'_, '_, '_> {
             );
             cursor += main + node.gap + extra;
         }
+        self.scratch.sizes.push(mains);
     }
 }

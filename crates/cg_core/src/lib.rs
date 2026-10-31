@@ -2,12 +2,34 @@
 //! game loop, the [`Time`] resource, messages and the [`Rect`] type. Re-exports
 //! [`bevy_ecs`] as [`ecs`], [`glam`] for maths and [`log`] for logging.
 //!
+//! Profiling scopes come from the [`profiling`] crate, re-exported here; see [`profile`].
+//!
 //! This crate has no platform code. The window, the input and the runner that drives the
 //! frames come from `cg_platform`; logging output is set up there too.
+//!
+//! Gameplay runs in fixed steps of 1/60 s (`FixedUpdate`), whatever the frame rate:
+//!
+//! ```
+//! use cg_core::prelude::*;
+//!
+//! #[derive(Resource, Default)]
+//! struct Steps(u32);
+//!
+//! let mut app = App::new();
+//! app.init_resource::<Steps>()
+//!     .add_systems(FixedUpdate, |mut steps: ResMut<Steps>| steps.0 += 1);
+//! // Three frames of 1/30 s: two fixed steps each.
+//! let frame = app.world().resource::<Time>().fixed_delta() * 2;
+//! for _ in 0..3 {
+//!     app.update(frame);
+//! }
+//! assert_eq!(app.world().resource::<Steps>().0, 6);
+//! ```
 
 mod app;
 mod exit;
 mod plugin;
+pub mod profile;
 mod rect;
 pub mod schedule;
 mod time;
@@ -25,6 +47,7 @@ pub use time::{DEFAULT_FIXED_HZ, DEFAULT_MAX_DELTA, DEFAULT_MAX_FIXED_STEPS, Tim
 pub use bevy_ecs as ecs;
 pub use glam;
 pub use log;
+pub use profiling;
 
 /// Shorthand for [`Default::default`], handy in struct literals:
 /// `WindowConfig { title: "Game".into(), ..default() }`.

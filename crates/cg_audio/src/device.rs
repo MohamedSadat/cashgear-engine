@@ -743,6 +743,7 @@ fn listener_position(
 /// Opens the device once allowed, then applies the frame's requests, moves positioned
 /// voices, feeds streams and clears out finished voices.
 #[allow(clippy::too_many_arguments)]
+#[profiling::function]
 pub(crate) fn update_audio(
     mut device: NonSendMut<AudioDevice>,
     mut audio: ResMut<Audio>,

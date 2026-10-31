@@ -23,6 +23,7 @@ type DrawItem = (
 
 /// Queues the UI into the screen-space sprite queue. Runs in `Render`, in
 /// `RenderSystems::Queue`.
+#[profiling::function]
 pub(crate) fn draw_ui(
     stack: Res<UiStack>,
     nodes: Query<DrawItem>,
@@ -132,7 +133,11 @@ fn draw_image(
 /// The nine (source, destination) pieces of a nine-slice image, without empty ones.
 /// Corners keep their texel size, one texel per UI pixel, shrinking evenly when the
 /// destination is smaller than two corners.
-pub(crate) fn nine_slices(source: Rect, dest: Rect, slice: Edges) -> Vec<(Rect, Rect)> {
+pub(crate) fn nine_slices(
+    source: Rect,
+    dest: Rect,
+    slice: Edges,
+) -> impl Iterator<Item = (Rect, Rect)> {
     let fit = |a: f32, b: f32, room: f32| {
         let total = a + b;
         if total > room && total > 0.0 {
@@ -157,17 +162,12 @@ pub(crate) fn nine_slices(source: Rect, dest: Rect, slice: Edges) -> Vec<(Rect, 
     ];
     let dx = [dest.min.x, dest.min.x + dl, dest.max.x - dr, dest.max.x];
     let dy = [dest.min.y, dest.min.y + dt, dest.max.y - db, dest.max.y];
-    let mut pieces = Vec::with_capacity(9);
-    for row in 0..3 {
-        for col in 0..3 {
-            let from = Rect::new(sx[col], sy[row], sx[col + 1], sy[row + 1]);
-            let to = Rect::new(dx[col], dy[row], dx[col + 1], dy[row + 1]);
-            if !from.is_empty() && !to.is_empty() {
-                pieces.push((from, to));
-            }
-        }
-    }
-    pieces
+    (0..9).filter_map(move |i| {
+        let (row, col) = (i / 3, i % 3);
+        let from = Rect::new(sx[col], sy[row], sx[col + 1], sy[row + 1]);
+        let to = Rect::new(dx[col], dy[row], dx[col + 1], dy[row + 1]);
+        (!from.is_empty() && !to.is_empty()).then_some((from, to))
+    })
 }
 
 #[cfg(test)]
@@ -178,7 +178,7 @@ mod tests {
     fn nine_slices_keep_corners_and_stretch_the_rest() {
         let source = Rect::new(0.0, 0.0, 12.0, 12.0);
         let dest = Rect::new(10.0, 10.0, 110.0, 50.0);
-        let pieces = nine_slices(source, dest, Edges::all(4.0));
+        let pieces: Vec<_> = nine_slices(source, dest, Edges::all(4.0)).collect();
         assert_eq!(pieces.len(), 9);
         assert_eq!(
             pieces[0],
@@ -205,11 +205,12 @@ mod tests {
 
     #[test]
     fn small_nine_slices_shrink_their_corners() {
-        let pieces = nine_slices(
+        let pieces: Vec<_> = nine_slices(
             Rect::new(0.0, 0.0, 12.0, 12.0),
             Rect::new(0.0, 0.0, 6.0, 40.0),
             Edges::all(4.0),
-        );
+        )
+        .collect();
         // No middle column is left; the corners take 3 UI pixels each.
         assert_eq!(pieces.len(), 6);
         assert_eq!(pieces[0].1, Rect::new(0.0, 0.0, 3.0, 4.0));

@@ -92,6 +92,7 @@ pub fn lerp_affine(from: Affine2, to: Affine2, t: f32) -> Affine2 {
 
 /// Records where each [`Interpolated`] entity is before a fixed step moves it. Runs in
 /// [`FixedPreUpdate`](cg_core::FixedPreUpdate), after a transform propagation.
+#[profiling::function]
 pub fn snapshot_interpolated(mut query: Query<(&GlobalTransform2D, &mut Interpolated)>) {
     for (global, mut interpolated) in &mut query {
         interpolated.previous = Some(global.0);
@@ -100,6 +101,7 @@ pub fn snapshot_interpolated(mut query: Query<(&GlobalTransform2D, &mut Interpol
 }
 
 /// Applies [`Interpolated::reset`] once the new transform has propagated.
+#[profiling::function]
 pub fn apply_interpolation_resets(mut query: Query<(&GlobalTransform2D, &mut Interpolated)>) {
     for (global, mut interpolated) in &mut query {
         if interpolated.reset {

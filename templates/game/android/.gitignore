@@ -1,0 +1,10 @@
+.gradle/
+.kotlin/
+build/
+/app/build/
+# Android Studio writes the SDK's location here.
+local.properties
+# Release signing stays out of git (see README.md).
+keystore.properties
+*.jks
+*.keystore

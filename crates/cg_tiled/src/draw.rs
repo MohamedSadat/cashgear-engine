@@ -180,6 +180,7 @@ fn transform_rect(transform: Affine2, rect: Rect) -> Rect {
 
 /// Queues the chunks and image layers of every visible tilemap that overlap the view,
 /// with animated tiles on their current frame.
+#[profiling::function]
 pub(crate) fn queue_tilemaps(
     time: Res<Time>,
     maps: Query<(&TilemapState, &GlobalTransform2D, &InheritedVisibility)>,

@@ -8,3 +8,6 @@ dist/
 *.swp
 .DS_Store
 Thumbs.db
+
+# The guide (mdbook build docs/book)
+/docs/book/book

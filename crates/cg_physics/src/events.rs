@@ -3,7 +3,6 @@
 
 use crate::world::Pair;
 use bevy_ecs::prelude::*;
-use std::collections::BTreeSet;
 
 /// Two colliders started overlapping in the latest physics step. The lower entity comes
 /// first.
@@ -91,13 +90,14 @@ pair_methods!(CollisionEnded);
 /// ```
 #[derive(Resource, Debug, Clone, Default, PartialEq)]
 pub struct Overlaps {
-    pairs: BTreeSet<Pair>,
+    /// Sorted, each pair once.
+    pairs: Vec<Pair>,
 }
 
 impl Overlaps {
     /// Whether `a` and `b` overlap.
     pub fn contains(&self, a: Entity, b: Entity) -> bool {
-        self.pairs.contains(&Pair::new(a, b))
+        self.pairs.binary_search(&Pair::new(a, b)).is_ok()
     }
 
     /// Every entity overlapping `entity`.
@@ -128,12 +128,35 @@ impl Overlaps {
         self.pairs.is_empty()
     }
 
-    /// Replaces the pairs, returning the ones that started and the ones that ended.
-    pub(crate) fn replace(&mut self, pairs: BTreeSet<Pair>) -> (Vec<Pair>, Vec<Pair>) {
-        let started = pairs.difference(&self.pairs).copied().collect();
-        let ended = self.pairs.difference(&pairs).copied().collect();
-        self.pairs = pairs;
-        (started, ended)
+    pub(crate) fn pairs(&self) -> &[Pair] {
+        &self.pairs
+    }
+
+    /// Replaces the pairs with `pairs` (sorted, each once) and fills `started` and `ended`
+    /// with the differences. `pairs` gets the old pairs back, so the caller can reuse its
+    /// memory.
+    pub(crate) fn replace(
+        &mut self,
+        pairs: &mut Vec<Pair>,
+        started: &mut Vec<Pair>,
+        ended: &mut Vec<Pair>,
+    ) {
+        started.clear();
+        ended.clear();
+        let (mut old, mut new) = (self.pairs.iter().peekable(), pairs.iter().peekable());
+        loop {
+            match (old.peek(), new.peek()) {
+                (Some(a), Some(b)) if a == b => {
+                    old.next();
+                    new.next();
+                }
+                (Some(a), Some(b)) if a < b => ended.extend(old.next()),
+                (_, Some(_)) => started.extend(new.next()),
+                (Some(_), None) => ended.extend(old.next()),
+                (None, None) => break,
+            }
+        }
+        core::mem::swap(&mut self.pairs, pairs);
     }
 }
 
@@ -146,9 +169,14 @@ mod tests {
         let e = |i| Entity::from_raw_u32(i).unwrap();
         let mut overlaps = Overlaps::default();
         let pair = |a, b| Pair::new(e(a), e(b));
-        let (started, ended) = overlaps.replace([pair(2, 1), pair(1, 3)].into());
+        let (mut started, mut ended) = (Vec::new(), Vec::new());
+        let mut pairs = vec![pair(2, 1), pair(1, 3)];
+        pairs.sort();
+        overlaps.replace(&mut pairs, &mut started, &mut ended);
         assert_eq!((started.len(), ended.len()), (2, 0));
-        let (started, ended) = overlaps.replace([pair(1, 3), pair(3, 2)].into());
+        let mut pairs = vec![pair(1, 3), pair(3, 2)];
+        pairs.sort();
+        overlaps.replace(&mut pairs, &mut started, &mut ended);
         assert_eq!(started, [Pair(e(2), e(3))]);
         assert_eq!(ended, [Pair(e(1), e(2))]);
         assert!(overlaps.contains(e(3), e(1)));

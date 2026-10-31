@@ -183,6 +183,7 @@ type FocusItem = (
 /// Moves the focus with the UI actions and clicks or adjusts the focused widget. Runs in
 /// `PreUpdate` after the pointer.
 #[allow(clippy::too_many_arguments)]
+#[profiling::function]
 pub(crate) fn navigate(
     action_state: Res<ActionState>,
     time: Res<Time>,
@@ -194,6 +195,7 @@ pub(crate) fn navigate(
     mut repeat: Local<Repeat>,
     mut clicks: MessageWriter<Clicked>,
     mut changes: MessageWriter<SliderChanged>,
+    mut menu: Local<Vec<Entity>>,
 ) {
     let root_of = |mut entity: Entity| {
         while let Ok(parent) = parents.get(entity) {
@@ -201,39 +203,41 @@ pub(crate) fn navigate(
         }
         entity
     };
-    // The focusable widgets of the topmost menu, in draw order.
-    let visible: Vec<_> = stack
-        .entities
-        .iter()
-        .filter_map(|&e| candidates.get(e).ok())
-        .filter(|(.., button)| !button.is_some_and(|b| b.disabled))
-        .collect();
-    let Some(&(top, ..)) = visible.last() else {
+    // The focusable widgets of the topmost menu, in draw order. The list keeps its memory
+    // from frame to frame.
+    let usable = |e: Entity| {
+        candidates
+            .get(e)
+            .is_ok_and(|(.., button)| !button.is_some_and(|b| b.disabled))
+    };
+    let Some(top) = stack.entities.iter().rev().copied().find(|&e| usable(e)) else {
         focus.focused = None;
         return;
     };
     let scope = root_of(top);
-    let menu: Vec<_> = visible
-        .into_iter()
-        .filter(|(e, ..)| root_of(*e) == scope)
-        .collect();
+    menu.clear();
+    menu.extend(
+        stack
+            .entities
+            .iter()
+            .copied()
+            .filter(|&e| usable(e) && root_of(e) == scope),
+    );
+    let items = || menu.iter().filter_map(|&e| candidates.get(e).ok());
     let first = || {
-        menu.iter()
+        items()
             .find(|(_, _, f, _)| f.auto_focus)
             .or_else(|| {
-                menu.iter().min_by(|a, b| {
+                items().min_by(|a, b| {
                     let (a, b) = (a.1.rect.min, b.1.rect.min);
                     (a.y, a.x)
                         .partial_cmp(&(b.y, b.x))
                         .unwrap_or(core::cmp::Ordering::Equal)
                 })
             })
-            .map(|(e, ..)| *e)
+            .map(|(e, ..)| e)
     };
-    if focus
-        .focused
-        .is_some_and(|f| !menu.iter().any(|(e, ..)| *e == f))
-    {
+    if focus.focused.is_some_and(|f| !menu.contains(&f)) {
         // The focused widget is gone, hidden or under a newer menu.
         focus.focused = None;
     }
@@ -280,15 +284,13 @@ pub(crate) fn navigate(
         return;
     }
     if let Some((action, direction)) = step {
-        let current = focus
-            .focused
-            .and_then(|f| menu.iter().find(|(e, ..)| *e == f));
+        let current = focus.focused.and_then(|f| items().find(|(e, ..)| *e == f));
         match current {
             None => {
                 focus.focused = first();
                 focus.from_keys = focus.focused.is_some();
             }
-            Some(&(entity, computed, ..)) => {
+            Some((entity, computed, ..)) => {
                 let horizontal = action == actions::LEFT || action == actions::RIGHT;
                 if horizontal && let Ok(mut slider) = sliders.get_mut(entity) {
                     let mut steps = if action == actions::RIGHT { 1.0 } else { -1.0 };
@@ -305,7 +307,7 @@ pub(crate) fn navigate(
                     }
                 } else {
                     let from = computed.rect.center();
-                    let targets = menu.iter().map(|(e, c, ..)| (*e, c.rect.center()));
+                    let targets = items().map(|(e, c, ..)| (e, c.rect.center()));
                     focus.focused = nearest(entity, from, direction, targets).or(Some(entity));
                 }
                 focus.from_keys = true;

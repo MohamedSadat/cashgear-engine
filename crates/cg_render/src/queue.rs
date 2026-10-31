@@ -49,6 +49,7 @@ type CameraItem = (
 );
 
 /// Picks the active camera and makes its view this frame's [`FrameView`].
+#[profiling::function]
 pub(crate) fn pick_camera(
     cameras: Query<CameraItem>,
     transforms: InterpolatedTransforms,
@@ -73,6 +74,7 @@ pub(crate) fn pick_camera(
 }
 
 /// Queues every visible sprite entity that overlaps the [`FrameView`].
+#[profiling::function]
 pub(crate) fn queue_world(
     sprites: Query<SpriteItem>,
     transforms: InterpolatedTransforms,

@@ -1,7 +1,46 @@
 # Changelog
 
-All notable changes to CashGear Engine are recorded here, one section per phase.
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+All notable changes to CashGear Engine are recorded here: one section per release, and
+before the first release one section per phase. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
+[Semantic Versioning](https://semver.org/) (in 0.x, a minor version may break games).
+
+## [0.1.0] — 2026-10-31
+
+The first release of CashGear Engine, a Rust 2D game engine for Windows, Linux, macOS, the web and Android. It has everything its fifteen phases built (the sections below): a fixed-step game loop, `wgpu` sprite batching with pixel-perfect scaling, entities and prefabs, background asset loading with hot reload, Tiled maps, platformer physics, Aseprite animation, tweens and particles, audio, text and UI with right-to-left languages and touch controls, Lua scripting, a scene editor, and web and Android builds. The sample platformer shows it all: play it at <https://mohamedsadat.github.io/cashgear-engine/>, or download it below for Windows and Android.
+
+Start a game with the template and the guide:
+
+```sh
+cargo install cargo-generate --locked
+cargo generate --git https://github.com/MohamedSadat/cashgear-engine templates/game --tag v0.1.0
+```
+
+The guide is at <https://mohamedsadat.github.io/cashgear-engine/book/> and the API docs at <https://mohamedsadat.github.io/cashgear-engine/api/>.
+
+### Phase 14 — Polish, performance and release
+
+#### Added
+
+- A game template, `templates/game`, for `cargo generate`: a small complete game (a title screen, a Tiled level with Kenney's CC0 art, an animated alien that runs and jumps, coins with a Lua script, spikes, a door, a win screen, touch controls, sounds) with its web page, its Android Gradle project, an editor build, a `--demo` bot with a test, and a CI workflow. It depends on the engine by git tag. CI generates a game from it on every push and checks it: formatting, lints, the bot test and the web build.
+- The guide, an mdBook in `docs/book`: getting started, a tour of the template, then a chapter for each part of the engine, the web, Android, profiling and releasing, and references for the examples and launch flags. Its code samples are the template's own code. CI publishes it at `/book/` on GitHub Pages, with the API docs (rustdoc, warnings denied) at `/api/`; the platformer stays at the root.
+- Profiling: the engine's schedules, systems and renderer steps are marked with the [`profiling`](https://docs.rs/profiling) crate's scopes, which cost nothing without a backend. The `profile` feature records them with puffin; the debug overlay's new Profiler window shows the recent frames, a flame graph of the chosen frame (hover for times, click to zoom) and the scopes ranked by their own time, on desktop, the web and Android. `--profile` records from the start and opens it. The `profile-tracy` feature sends them to Tracy instead. `cg_core::profile` (`set_recording`, `is_recording`) and the re-exported `profiling` crate let games mark their own systems; wgpu and egui scopes show too.
+- `cg_bench` (`benches/`): headless scenes (10,000 sprites, a Tiled level with 200 bodies and particles, a menu, 500 scripted bodies, the platformer played by its bot) timed with criterion (`cargo bench -p cg_bench`); CI posts the table in the run's summary. An allocation test counts heap allocations per frame with a counting allocator and requires none in the sprite, level and menu scenes; `CG_ALLOC_TRACE=<frames>` prints where a scene's allocations come from.
+- Lua `require`: shared code in other script files, run once and returned to every file that asks (`require("enemies.common")` loads `enemies/common.lua`). Required files load through the asset server, and changing one reloads the files that require it. Circular requires are errors.
+- A release workflow (`.github/workflows/release.yml`): a `v*` tag checks that the tag, the workspace version, the template and the changelog agree, builds the platformer for Windows (a zip with the executable and its asset bundle), the web (a zip for itch.io or any host) and Android (an APK and an AAB, signed when the repository has the keystore secrets), and publishes a GitHub Release with this changelog section. `tools/release.py` bumps the version, checks a tag and prints the notes.
+- A shipped desktop game reads `assets.cgpak` next to its executable (when not run by `cargo run` and `CG_ASSET_ROOT` is not set), so a release is the executable and one bundle.
+- Android builds take their version from `-PversionName=X.Y.Z`, with the version code Google Play needs from it (1.2.3 is 10203).
+- Code examples at the top of `cg_core`, `cg_platform` and `cg_editor`'s documentation.
+
+#### Changed
+
+- The engine's frame loop makes no heap allocations in steady frames. The physics keeps its spatial hash buckets, query buffers and overlap lists between steps (`Overlaps` is a sorted list, and changes only when the pairs do); the UI layout keeps its lists; focus navigation keeps its menu list; the batcher sorts with a stable counting sort over its few distinct keys, in kept buffers (release bunnymark at 10,000 sprites: 1.29 ms a frame, against 1.41 ms in Phase 13); nine-slice images and the locale no longer allocate per frame. The level scene went from about 1,170 allocations a frame to none, and its frame time down 9%.
+- Lua: engine calls find the lent world in the app data instead of a registry lookup, `self` finds its entity without a string key, entities handed to Lua are cached (one userdata per entity while Lua holds it), `self:contacts()` refills one table kept on `self`, and query results are sized up front. The runtime no longer rebuilds its lists each step when no script, entity or file changed. A frame of 500 scripted bodies went from 4.3 to 2.7 ms.
+- The platformer's HUD and log reuse their strings; the platformer and template open no console window in Windows release builds.
+
+#### Fixed
+
+- `platformer --demo --level N` left its bot on the pause menu for ever: started from a level, it had never used the menus, so nothing had the focus and its Accept did nothing. It now moves the focus to Resume (and to Next on the level-complete screen) first.
 
 ## Phase 13 — Scene editor
 

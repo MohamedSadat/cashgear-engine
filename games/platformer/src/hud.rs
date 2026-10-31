@@ -4,7 +4,7 @@
 
 use crate::level::LEVELS;
 use crate::menus::{GOLD, INK};
-use crate::progress::{MAX_HEARTS, Session, format_time};
+use crate::progress::{MAX_HEARTS, Session, write_time};
 use crate::{Art, Screen, tile_rect};
 use cashgear_engine::prelude::*;
 use cashgear_engine::ui::DEFAULT_FONT_SIZE;
@@ -192,7 +192,9 @@ fn update_hud(
     mut hearts: Query<(&Heart, &mut UiImage)>,
     mut coins: Query<&mut Text, (With<CoinCount>, Without<Clock>)>,
     mut clocks: Query<&mut Text, (With<Clock>, Without<CoinCount>)>,
+    mut scratch: Local<String>,
 ) {
+    use core::fmt::Write;
     for (heart, mut image) in &mut hearts {
         let tile = if heart.0 < session.hearts {
             HEART_FULL
@@ -204,16 +206,19 @@ fn update_hud(
             image.source = source;
         }
     }
-    let count = format!("{}/{}", session.coins, session.coins_total);
+    // Written into one string that keeps its memory, and copied only when it changed, so
+    // the HUD allocates nothing in a steady frame.
+    scratch.clear();
+    let _ = write!(scratch, "{}/{}", session.coins, session.coins_total);
     for mut text in &mut coins {
-        if text.value != count {
-            text.value = count.clone();
+        if text.value != *scratch {
+            text.value.clone_from(&scratch);
         }
     }
-    let time = format_time(session.finished.unwrap_or(session.time));
+    write_time(&mut scratch, session.finished.unwrap_or(session.time));
     for mut text in &mut clocks {
-        if text.value != time {
-            text.value = time.clone();
+        if text.value != *scratch {
+            text.value.clone_from(&scratch);
         }
     }
 }

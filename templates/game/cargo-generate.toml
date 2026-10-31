@@ -1,0 +1,30 @@
+# The CashGear Engine game template:
+#
+#     cargo generate --git https://github.com/MohamedSadat/cashgear-engine templates/game --tag v0.1.0
+#
+# cargo-generate asks for the project's name (a folder and crate name such as `my-game`)
+# and the values below, then fills in the `{{ }}` placeholders.
+
+[template]
+cargo_generate_version = ">=0.21.0"
+# Copied as they are: art, sounds, maps and the web page's scripts never hold placeholders.
+exclude = [
+    "assets/**",
+    "web/icons/**",
+    "web/loader.mjs",
+    "android/gradle/**",
+    "android/gradlew",
+    "android/gradlew.bat",
+    "android/app/src/main/res/mipmap-*/**",
+]
+
+[placeholders.title]
+type = "string"
+prompt = "The game's title (window, web page and app name)?"
+default = "My Game"
+
+[placeholders.app_id]
+type = "string"
+prompt = "Android application id (reverse domain, lowercase)?"
+default = "com.example.mygame"
+regex = "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"

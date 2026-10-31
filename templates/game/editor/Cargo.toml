@@ -1,0 +1,11 @@
+[package]
+name = "{{crate_name}}_editor"
+description = "{{title}} with the scene editor built in: Play runs the level being edited."
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+cashgear_engine = { workspace = true, features = ["debug-overlay"] }
+cg_editor.workspace = true
+{{crate_name}} = { path = ".." }

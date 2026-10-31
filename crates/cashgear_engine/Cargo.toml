@@ -12,6 +12,11 @@ publish.workspace = true
 default = ["debug-overlay"]
 # The egui debug overlay (F12): frame times, render stats, entities and components.
 debug-overlay = ["cg_ui/debug-overlay", "cg_script?/debug-overlay"]
+# Profiling with puffin: the engine's scopes are recorded while recording is on
+# (`--profile`, or the overlay's Profiler window), and the debug overlay shows them.
+profile = ["cg_core/profile", "cg_ui/profile"]
+# Profiling with Tracy, desktop only: connect the Tracy profiler while the game runs.
+profile-tracy = ["cg_core/profile-tracy"]
 # Lua scripting (`cg_script` and `ScriptPlugin` in `DefaultPlugins`). Scripts run on desktop
 # and Android; on the web the plugin is there but runs nothing (see `cg_script`).
 script = ["dep:cg_script"]

@@ -8,7 +8,8 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 use cg_core::Rect;
 use cg_core::glam::{IVec2, Vec2};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
+use std::sync::{Mutex, PoisonError};
 
 /// One entity collider as of the latest step.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -74,23 +75,31 @@ impl SpatialHash {
             .then_some((min, max))
     }
 
+    /// Buckets the colliders again. Buckets keep their memory between steps, so a scene
+    /// whose colliders stay in the same area allocates nothing.
     fn rebuild(&mut self, entries: &[Entry]) {
-        self.cells.clear();
+        for bucket in self.cells.values_mut() {
+            bucket.clear();
+        }
         self.large.clear();
+        let mut occupied = 0;
         for (index, entry) in entries.iter().enumerate() {
             match Self::range(entry.reach().aabb()) {
                 Some((min, max)) => {
                     for y in min.y..=max.y {
                         for x in min.x..=max.x {
-                            self.cells
-                                .entry(IVec2::new(x, y))
-                                .or_default()
-                                .push(index as u32);
+                            let bucket = self.cells.entry(IVec2::new(x, y)).or_default();
+                            occupied += usize::from(bucket.is_empty());
+                            bucket.push(index as u32);
                         }
                     }
                 }
                 None => self.large.push(index as u32),
             }
+        }
+        // Forget the cells colliders have left, once they are most of the map.
+        if self.cells.len() > 1024 && self.cells.len() > 4 * occupied {
+            self.cells.retain(|_, bucket| !bucket.is_empty());
         }
     }
 
@@ -128,6 +137,38 @@ pub struct PhysicsWorld {
     hash: SpatialHash,
     /// The centre of each static collider in the previous step, to find how far it moved.
     previous: HashMap<Entity, Vec2>,
+    /// Buffers for the spatial hash's candidates, reused so queries do not allocate.
+    scratch: Mutex<Vec<Vec<u32>>>,
+}
+
+/// A buffer from [`PhysicsWorld::scratch`], handed back when dropped.
+pub(crate) struct Scratch<'a> {
+    pool: &'a Mutex<Vec<Vec<u32>>>,
+    buffer: Vec<u32>,
+}
+
+impl core::ops::Deref for Scratch<'_> {
+    type Target = Vec<u32>;
+
+    fn deref(&self) -> &Vec<u32> {
+        &self.buffer
+    }
+}
+
+impl core::ops::DerefMut for Scratch<'_> {
+    fn deref_mut(&mut self) -> &mut Vec<u32> {
+        &mut self.buffer
+    }
+}
+
+impl Drop for Scratch<'_> {
+    fn drop(&mut self) {
+        let buffer = core::mem::take(&mut self.buffer);
+        self.pool
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(buffer);
+    }
 }
 
 impl PhysicsWorld {
@@ -216,6 +257,20 @@ impl PhysicsWorld {
         &self.grids
     }
 
+    /// A buffer for [`near`](Self::near), from a pool that keeps its memory.
+    pub(crate) fn scratch(&self) -> Scratch<'_> {
+        let buffer = self
+            .scratch
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .pop()
+            .unwrap_or_default();
+        Scratch {
+            pool: &self.scratch,
+            buffer,
+        }
+    }
+
     /// Every collider whose bounding box may touch `rect`.
     pub(crate) fn near<'a>(
         &'a self,
@@ -229,16 +284,17 @@ impl PhysicsWorld {
     /// Every pair of interacting colliders that overlap, except pairs of two static ones.
     /// Bodies are tested by their swept box against sensors and other bodies, and by their
     /// final shape against static colliders.
-    pub(crate) fn overlapping_pairs(&self) -> BTreeSet<Pair> {
-        let mut pairs = BTreeSet::new();
-        let mut buffer = Vec::new();
+    /// `pairs` is emptied first, and comes back sorted with each pair once.
+    pub(crate) fn overlapping_pairs(&self, pairs: &mut Vec<Pair>) {
+        pairs.clear();
+        let mut buffer = self.scratch();
         for (i, a) in self.entries.iter().enumerate() {
             if a.is_static() {
                 continue;
             }
             self.hash
                 .candidates(a.reach().aabb(), self.entries.len(), &mut buffer);
-            for &j in &buffer {
+            for &j in buffer.iter() {
                 let j = j as usize;
                 let b = &self.entries[j];
                 // Pairs of two moving colliders are found from the lower index only.
@@ -251,11 +307,12 @@ impl PhysicsWorld {
                     a.reach().overlaps(&b.reach())
                 };
                 if overlap && a.layers.interacts(b.layers) {
-                    pairs.insert(Pair::new(a.entity, b.entity));
+                    pairs.push(Pair::new(a.entity, b.entity));
                 }
             }
         }
-        pairs
+        pairs.sort_unstable();
+        pairs.dedup();
     }
 }
 
@@ -394,32 +451,52 @@ pub(crate) struct Grid<'a> {
     pub layers: CollisionLayers,
 }
 
+/// Grids kept inline in an [`Env`]; levels rarely have more, and more go on the heap.
+const INLINE_GRIDS: usize = 4;
+
 /// What movement and queries collide with: the colliders and the tile grids.
 pub(crate) struct Env<'a> {
     pub world: &'a PhysicsWorld,
-    pub grids: Vec<Grid<'a>>,
+    inline: [Option<Grid<'a>>; INLINE_GRIDS],
+    more: Vec<Grid<'a>>,
 }
 
 impl<'a> Env<'a> {
-    /// The world's colliders and the grids `lookup` finds for its tile colliders.
+    /// The world's colliders and the grids `lookup` finds for its tile colliders. Making
+    /// one allocates nothing unless the world has more than four tile colliders.
     pub fn new(world: &'a PhysicsWorld, lookup: impl Fn(Entity) -> Option<&'a TileGrid>) -> Self {
-        let grids = world
-            .grids()
-            .iter()
-            .filter_map(|entry| {
-                Some(Grid {
-                    entity: entry.entity,
-                    grid: lookup(entry.entity)?,
-                    offset: entry.offset,
-                    layers: entry.layers,
-                })
-            })
-            .collect();
-        Self { world, grids }
+        let mut env = Self {
+            world,
+            inline: [None; INLINE_GRIDS],
+            more: Vec::new(),
+        };
+        let mut count = 0;
+        for entry in world.grids() {
+            let Some(grid) = lookup(entry.entity) else {
+                continue;
+            };
+            let grid = Grid {
+                entity: entry.entity,
+                grid,
+                offset: entry.offset,
+                layers: entry.layers,
+            };
+            match env.inline.get_mut(count) {
+                Some(slot) => *slot = Some(grid),
+                None => env.more.push(grid),
+            }
+            count += 1;
+        }
+        env
+    }
+
+    /// The tile grids, in the world's order.
+    pub fn grids(&self) -> impl Iterator<Item = &Grid<'a>> {
+        self.inline.iter().flatten().chain(&self.more)
     }
 
     pub fn grid(&self, entity: Entity) -> Option<&Grid<'a>> {
-        self.grids.iter().find(|grid| grid.entity == entity)
+        self.grids().find(|grid| grid.entity == entity)
     }
 
     pub fn raycast(
@@ -433,7 +510,7 @@ impl<'a> Env<'a> {
         let mut best: Option<RayHit> = None;
         let mut reach = max_distance;
         if filter.tiles {
-            for grid in &self.grids {
+            for grid in self.grids() {
                 if !filter.accepts(grid.entity, grid.layers) {
                     continue;
                 }
@@ -452,7 +529,7 @@ impl<'a> Env<'a> {
             }
         }
         let span = Rect::from_corners(origin, origin + direction * reach);
-        let mut buffer = Vec::new();
+        let mut buffer = self.world.scratch();
         for entry in self.world.near(span, &mut buffer) {
             if !filter.accepts_entry(entry) {
                 continue;
@@ -475,7 +552,7 @@ impl<'a> Env<'a> {
     }
 
     pub fn overlap_shape(&self, shape: WorldShape, filter: QueryFilter) -> Vec<Entity> {
-        let mut buffer = Vec::new();
+        let mut buffer = self.world.scratch();
         self.world
             .near(shape.aabb(), &mut buffer)
             .filter(|entry| filter.accepts_entry(entry) && shape.overlaps(&entry.shape))
@@ -484,7 +561,7 @@ impl<'a> Env<'a> {
     }
 
     pub fn overlap_point(&self, point: Vec2, filter: QueryFilter) -> Vec<Entity> {
-        let mut buffer = Vec::new();
+        let mut buffer = self.world.scratch();
         self.world
             .near(Rect::from_center_size(point, Vec2::ZERO), &mut buffer)
             .filter(|entry| filter.accepts_entry(entry) && entry.shape.contains(point))
@@ -496,7 +573,7 @@ impl<'a> Env<'a> {
         if !filter.tiles {
             return None;
         }
-        self.grids.iter().find_map(|grid| {
+        self.grids().find_map(|grid| {
             if !filter.accepts(grid.entity, grid.layers) {
                 return None;
             }
@@ -654,11 +731,9 @@ mod tests {
             ..entry(5, rect(0.0, 0.0, 20.0, 20.0))
         });
         world.rebuild();
-        let pairs: Vec<_> = world
-            .overlapping_pairs()
-            .into_iter()
-            .map(|p| (p.0, p.1))
-            .collect();
+        let mut found = Vec::new();
+        world.overlapping_pairs(&mut found);
+        let pairs: Vec<_> = found.into_iter().map(|p| (p.0, p.1)).collect();
         // 1-2 are both static; 5 is on a layer nothing else filters for.
         assert_eq!(
             pairs,
@@ -689,11 +764,9 @@ mod tests {
         // path is static, so only its final shape counts.
         world.move_body(entity(3), rect(100.0, 0.0, 110.0, 10.0));
         world.rebuild();
-        let pairs: Vec<_> = world
-            .overlapping_pairs()
-            .into_iter()
-            .map(|p| (p.0, p.1))
-            .collect();
+        let mut found = Vec::new();
+        world.overlapping_pairs(&mut found);
+        let pairs: Vec<_> = found.into_iter().map(|p| (p.0, p.1)).collect();
         assert_eq!(pairs, [(entity(1), entity(3))]);
         assert_eq!(world.shape(entity(3)), Some(rect(100.0, 0.0, 110.0, 10.0)));
     }

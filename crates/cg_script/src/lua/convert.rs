@@ -1,6 +1,6 @@
 //! Values between Lua and Rust: [`ScriptValue`]s, entities, vectors and colours.
 
-use super::LuaEntity;
+use super::{EntityData, LuaEntity};
 use crate::ScriptValue;
 use cg_core::glam::{Vec2, vec2};
 use cg_render::Color;
@@ -47,7 +47,7 @@ fn from_lua_at(value: LuaValue, depth: u32) -> LuaResult<ScriptValue> {
         LuaValue::Integer(n) => ScriptValue::Int(n),
         LuaValue::Number(n) => ScriptValue::Number(n),
         LuaValue::String(s) => ScriptValue::String(s.to_str()?.to_owned()),
-        LuaValue::UserData(ud) => match ud.borrow::<LuaEntity>() {
+        LuaValue::UserData(ud) => match ud.borrow::<EntityData>() {
             Ok(e) => ScriptValue::Entity(e.0),
             Err(_) => {
                 return Err(LuaError::runtime(
@@ -58,7 +58,7 @@ fn from_lua_at(value: LuaValue, depth: u32) -> LuaResult<ScriptValue> {
         LuaValue::Table(table) => {
             // A script's `self` stands for its entity.
             if let Ok(LuaValue::UserData(ud)) = table.raw_get::<LuaValue>("entity")
-                && let Ok(e) = ud.borrow::<LuaEntity>()
+                && let Ok(e) = ud.borrow::<EntityData>()
             {
                 return Ok(ScriptValue::Entity(e.0));
             }

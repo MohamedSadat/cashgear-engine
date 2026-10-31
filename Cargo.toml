@@ -2,7 +2,8 @@
 resolver = "3"
 # `games/platformer/android` is the platformer's Android entry point (a cdylib).
 # `games/platformer/editor` is the platformer with the scene editor built in (desktop only).
-members = ["crates/*", "examples/*", "games/*", "games/platformer/android", "games/platformer/editor", "tools/*"]
+# `benches` holds the engine's benchmarks and its allocation check (`cg_bench`).
+members = ["benches", "crates/*", "examples/*", "games/*", "games/platformer/android", "games/platformer/editor", "tools/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -34,6 +35,8 @@ bevy_ecs = { version = "0.20.1", default-features = false, features = ["std", "a
 bytemuck = { version = "1.25.2", features = ["derive"] }
 console_error_panic_hook = "0.1.7"
 console_log = "1.1.0"
+# Benchmarks (`cg_bench`, dev only), without plots or the rayon dependency.
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 # Text shaping (harfrust), bidirectional text, line breaking and glyph rasterizing
 # (swash). No system fonts: games ship theirs, which works the same on every target.
 cosmic-text = { version = "0.19.0", default-features = false, features = ["std", "swash"] }
@@ -60,6 +63,10 @@ miniz_oxide = "0.9.1"
 mlua = { version = "0.12.2", features = ["lua54", "vendored"] }
 notify = "8.2.1"
 pollster = "1.0.1"
+# Profiling scopes (`profiling::scope!`, `#[profiling::function]`): they compile to nothing
+# unless a backend is chosen, puffin with the `profile` features, Tracy with `profile-tracy`.
+profiling = { version = "1.0.18", default-features = false, features = ["procmacros"] }
+puffin = "0.20.0"
 ron = "0.12.3"
 rtrb = "0.4.1"
 serde = { version = "1.0.229", features = ["derive"] }

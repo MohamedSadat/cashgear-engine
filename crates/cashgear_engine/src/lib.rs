@@ -28,11 +28,23 @@
 //!         .run()
 //! }
 //! ```
+//!
+//! # Features
+//!
+//! | Feature | Default | Adds |
+//! | --- | --- | --- |
+//! | `debug-overlay` | yes | The F12 egui overlay: frame times, render stats, entities, an inspector |
+//! | `script` | no | Lua 5.4 scripts (`cg_script`) on desktop and Android; the web build runs none |
+//! | `profile` | no | puffin profiling of the engine's scopes, shown in the overlay's Profiler window |
+//! | `profile-tracy` | no | Tracy profiling on desktop |
 
 pub use cg_anim as anim;
 pub use cg_assets as assets;
 pub use cg_audio as audio;
 pub use cg_core as core;
+/// Profiling scopes for game code (`profiling::scope!`, `#[profiling::function]`); see
+/// [`core::profile`].
+pub use cg_core::profiling;
 pub use cg_physics as physics;
 pub use cg_platform as platform;
 pub use cg_render as render;
@@ -103,7 +115,9 @@ macro_rules! android_main {
 /// `--asset-delay <seconds>` and `--bundle <path>` the assets, `--physics-debug` draws
 /// colliders from the start, `--no-audio` turns the sound off, `--touch` and `--no-touch`
 /// show or hide the on-screen touch controls whatever the device, `--overlay` opens the
-/// debug overlay, and `--no-scripts` stops Lua scripts from running (`script` feature).
+/// debug overlay, `--profile` records profiling scopes from the start and opens the
+/// overlay's Profiler window (`profile` feature), and `--no-scripts` stops Lua scripts from
+/// running (`script` feature).
 ///
 /// Configure it with struct-update syntax:
 ///
@@ -169,6 +183,13 @@ impl Plugin for DefaultPlugins {
         app.add_plugins(self.script.clone().with_args(&args));
         #[cfg(feature = "debug-overlay")]
         register_inspect(app);
+        if args.flag("profile") {
+            if cfg!(feature = "profile") {
+                cg_core::profile::set_recording(true);
+            } else {
+                cg_core::log::warn!("--profile needs a build with the `profile` feature");
+            }
+        }
     }
 }
 

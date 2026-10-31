@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <meta name="description" content="{{title}}, a game made with CashGear Engine." />
+    <meta name="theme-color" content="#1a1c2c" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <title>{{title}}</title>
+    <!-- The game. Release builds (`trunk build --release --no-default-features`) use the
+         small `web-release` profile and wasm-opt; web/loader.mjs shows the progress. -->
+    <link
+      data-trunk
+      rel="rust"
+      href="Cargo.toml"
+      data-bin="{{crate_name}}"
+      data-cargo-profile-release="web-release"
+      data-wasm-opt="z"
+      data-initializer="web/loader.mjs"
+    />
+    <!-- Debug builds fetch these files one by one; release builds pack them into
+         assets.cgpak (the post_build hook in Trunk.toml), which starts downloading here. -->
+    <link data-trunk rel="copy-dir" href="assets" />
+    <link rel="preload" href="assets.cgpak" as="fetch" crossorigin />
+    <!-- Installing to a home screen: full screen, landscape, with the game's icon. -->
+    <link data-trunk rel="copy-dir" href="web/icons" />
+    <link data-trunk rel="copy-file" href="web/manifest.webmanifest" />
+    <link data-trunk rel="icon" href="web/icons/favicon.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+    <style>
+      :root {
+        --ink: #1a1c2c;
+        --slate: #333c57;
+        --pale: #f4f4f4;
+        --gold: #ffcd75;
+        color-scheme: dark;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
+        background: var(--ink);
+        color: var(--pale);
+        font: 16px/1.4 system-ui, sans-serif;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      body {
+        height: 100dvh;
+      }
+      /* The canvas fills the page; the engine sizes its drawing buffer to match, in
+         physical pixels. */
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        outline: none;
+        touch-action: none;
+      }
+      .screen {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        padding: 16px;
+        text-align: center;
+        background: var(--ink);
+      }
+      #loading {
+        z-index: 2;
+        transition: opacity 0.4s;
+      }
+      #loading.done {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .logo {
+        width: 96px;
+        height: 96px;
+        image-rendering: pixelated;
+        border-radius: 12px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 22px;
+        letter-spacing: 0.04em;
+      }
+      .track {
+        width: min(320px, 70vw);
+        height: 10px;
+        padding: 3px;
+        border: 3px solid var(--pale);
+        background: var(--slate);
+      }
+      #loading-bar {
+        width: 0;
+        height: 100%;
+        background: var(--gold);
+      }
+      #loading-status {
+        min-height: 1.4em;
+        font-variant-numeric: tabular-nums;
+        opacity: 0.8;
+      }
+      #error {
+        z-index: 3;
+      }
+      #error[hidden] {
+        display: none;
+      }
+      #error-detail {
+        max-width: min(560px, 90vw);
+        max-height: 30vh;
+        overflow: auto;
+        margin: 0;
+        font-size: 13px;
+        white-space: pre-wrap;
+        opacity: 0.7;
+      }
+      #error-hint {
+        max-width: min(480px, 90vw);
+        margin: 0;
+      }
+      button {
+        font: inherit;
+        padding: 8px 20px;
+        border: 3px solid var(--pale);
+        background: var(--slate);
+        color: var(--pale);
+        cursor: pointer;
+      }
+      /* Phones in portrait: a notice to turn sideways (the game pauses underneath). */
+      #rotate {
+        display: none;
+        z-index: 1;
+      }
+      @media (orientation: portrait) and (pointer: coarse) {
+        #rotate {
+          display: flex;
+        }
+      }
+      #rotate svg {
+        width: 72px;
+        height: 72px;
+        animation: turn 2.4s ease-in-out infinite;
+      }
+      @keyframes turn {
+        0%,
+        30% {
+          transform: rotate(0deg);
+        }
+        60%,
+        100% {
+          transform: rotate(-90deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="cashgear"></canvas>
+    <div id="loading" class="screen">
+      <img class="logo" src="icons/icon-192.png" alt="" />
+      <h1>{{title}}</h1>
+      <div class="track"><div id="loading-bar"></div></div>
+      <div id="loading-status"></div>
+      <noscript>This game needs JavaScript.</noscript>
+    </div>
+    <div id="rotate" class="screen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="7" y="2" width="10" height="20" rx="2" />
+        <line x1="11" y1="18.5" x2="13" y2="18.5" />
+      </svg>
+      <p>Turn your phone sideways to play</p>
+    </div>
+    <div id="error" class="screen" hidden>
+      <h1 id="error-title"></h1>
+      <p id="error-hint"></p>
+      <pre id="error-detail"></pre>
+      <button id="error-reload" type="button" onclick="location.reload()">Reload</button>
+    </div>
+    <script>
+      // If the game's scripts never run (blocked, failed to download, or a browser too old
+      // for modules), say so instead of loading for ever. web/loader.mjs sets
+      // window.cashgearBundle as soon as it runs.
+      setTimeout(function () {
+        if ("cashgearBundle" in window) return;
+        document.getElementById("error-title").textContent = "The game could not load";
+        document.getElementById("error-hint").textContent =
+          "Check your connection and reload. The game needs an up-to-date browser.";
+        document.getElementById("error").hidden = false;
+        var loading = document.getElementById("loading");
+        if (loading) loading.remove();
+      }, 20000);
+    </script>
+  </body>
+</html>

@@ -266,10 +266,14 @@ fn the_sandbox_has_no_files_or_system() {
     app.world_mut().spawn(Script::new(other));
     run(&mut app, 1);
     let notes_now = notes(&mut app);
+    // `require` is the engine's own, reading script files through the asset server.
+    assert!(
+        notes_now.iter().any(|n| n.starts_with("require function")),
+        "{notes_now:?}"
+    );
     for name in [
         "os",
         "io",
-        "require",
         "package",
         "debug",
         "load",
@@ -656,4 +660,101 @@ fn turned_off_scripts_do_not_run() {
     run(&mut app, 2);
     assert!(notes(&mut app).is_empty());
     let _ = Duration::ZERO;
+}
+
+#[test]
+fn require_shares_a_files_result_between_files() {
+    let mut app = app();
+    // A counter module: both files get the same table, so they count together. (Files made
+    // in code stay while their handles do; files `require` loads itself, it keeps.)
+    let _counter = script(
+        &app,
+        "shared/counter.lua",
+        "local m = { n = 0 }\nfunction m.bump() m.n = m.n + 1 return m.n end\nreturn m",
+    );
+    let _flag = script(&app, "shared/flag.lua", "local x = 1");
+    let first = script(
+        &app,
+        "scripts/first.lua",
+        r#"
+        local counter = require("shared.counter")
+        local flag = require("shared/flag.lua")
+        return { on_start = function() game.note("first " .. counter.bump() .. " " .. tostring(flag)) end }
+        "#,
+    );
+    let second = script(
+        &app,
+        "scripts/second.lua",
+        r#"
+        local counter = require("shared/counter")
+        return { on_start = function() game.note("second " .. counter.bump()) end }
+        "#,
+    );
+    app.world_mut().spawn(Script::new(first));
+    app.world_mut().spawn(Script::new(second));
+    run(&mut app, 1);
+    let mut seen = notes(&mut app);
+    seen.sort();
+    assert_eq!(seen, ["first 1 true", "second 2"]);
+    assert!(errors(&app).is_empty(), "{:?}", errors(&app));
+}
+
+#[test]
+fn changing_a_required_file_reloads_the_files_that_require_it() {
+    let mut app = app();
+    let _tuning = script(&app, "shared/tuning.lua", "return { speed = 1 }");
+    let handle = script(
+        &app,
+        "scripts/mover.lua",
+        r#"
+        local tuning = require("shared.tuning")
+        return {
+          on_reload = function(self) game.note("reloaded") end,
+          on_update = function(self) game.note("speed " .. tuning.speed) end,
+        }
+        "#,
+    );
+    app.world_mut().spawn(Script::new(handle));
+    run(&mut app, 1);
+    assert_eq!(notes(&mut app), ["speed 1"]);
+    script(&app, "shared/tuning.lua", "return { speed = 2 }");
+    run(&mut app, 1);
+    assert_eq!(notes(&mut app), ["reloaded", "speed 2"]);
+}
+
+#[test]
+fn bad_requires_are_errors_with_the_line() {
+    let mut app = app();
+    let _a = script(&app, "shared/a.lua", "return require('shared.b')");
+    let _b = script(&app, "shared/b.lua", "return require('shared.a')");
+    let circular = script(
+        &app,
+        "scripts/circular.lua",
+        "local a = require('shared.a')\nreturn {}",
+    );
+    app.world_mut().spawn(Script::new(circular));
+    run(&mut app, 1);
+    let errors_now = errors(&app);
+    assert!(
+        errors_now
+            .iter()
+            .any(|e| e.contains("requires itself (directly or through other files)")),
+        "{errors_now:?}"
+    );
+    // Inside a hook, a file that is not loaded yet cannot be waited for.
+    let late = script(
+        &app,
+        "scripts/late.lua",
+        "return { on_start = function() require('shared.never') end }",
+    );
+    app.world_mut().spawn(Script::new(late));
+    run(&mut app, 1);
+    let errors_now = errors(&app);
+    assert!(
+        errors_now
+            .iter()
+            .any(|e| e.starts_with("scripts/late.lua:1:")
+                && (e.contains("is not loaded yet") || e.contains("cannot load"))),
+        "{errors_now:?}"
+    );
 }

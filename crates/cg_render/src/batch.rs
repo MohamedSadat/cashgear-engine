@@ -33,10 +33,19 @@ pub(crate) struct Batch {
     pub(crate) instances: Range<u32>,
 }
 
+/// A sprite's place in the draw order: its layer, then its texture.
+type SortKey = (i32, AssetId<Image>);
+
 /// Reusable buffers for building batches each frame.
 #[derive(Default)]
 pub(crate) struct Batcher {
     order: Vec<u32>,
+    /// The sort's buffers: the distinct keys, each sprite's key among them (then its
+    /// rank), the keys' ranks, and where the next sprite of each rank goes.
+    keys: Vec<SortKey>,
+    slots: Vec<u32>,
+    ranks: Vec<u32>,
+    starts: Vec<u32>,
     pub(crate) instances: Vec<SpriteInstance>,
     pub(crate) batches: Vec<Batch>,
     /// The index of the first screen-space batch; world batches come before it.
@@ -66,14 +75,14 @@ impl Batcher {
         &mut self,
         sprites: &[QueuedSprite],
         images: &Assets<Image>,
-        key: impl Fn(&QueuedSprite) -> (i32, AssetId<Image>),
+        key: impl Fn(&QueuedSprite) -> SortKey,
     ) {
         self.order.clear();
-        self.order.extend(0..sprites.len() as u32);
-        let key = |&i: &u32| key(&sprites[i as usize]);
         // Queues are usually built in order already; skip the sort then.
-        if !self.order.is_sorted_by_key(key) {
-            self.order.sort_by_key(key);
+        if sprites.is_sorted_by_key(&key) {
+            self.order.extend(0..sprites.len() as u32);
+        } else {
+            self.sort(sprites, &key);
         }
 
         let first = self.batches.len();
@@ -95,6 +104,98 @@ impl Batcher {
                     instances: index..index + 1,
                 }),
             }
+        }
+    }
+
+    /// Fills `order` with the sprites sorted by `key`, keeping queue order among equal
+    /// keys. A counting sort over the distinct keys: a frame has few (layers times
+    /// textures), so it is linear in the sprites, and its buffers keep their memory, where
+    /// the standard library's stable sort allocates a buffer each time.
+    fn sort(&mut self, sprites: &[QueuedSprite], key: &impl Fn(&QueuedSprite) -> SortKey) {
+        /// Up to this many distinct keys are found by a scan; past it, by a binary search.
+        const SCAN: usize = 32;
+        // Each sprite's key, as an index into the distinct keys in the order first seen.
+        self.keys.clear();
+        self.slots.clear();
+        let mut last: Option<(SortKey, u32)> = None;
+        for sprite in sprites {
+            let k = key(sprite);
+            let slot = match last {
+                Some((seen, slot)) if seen == k => slot,
+                _ => {
+                    let slot = match self.keys.iter().position(|seen| *seen == k) {
+                        Some(slot) => slot,
+                        None => {
+                            self.keys.push(k);
+                            self.keys.len() - 1
+                        }
+                    } as u32;
+                    last = Some((k, slot));
+                    slot
+                }
+            };
+            self.slots.push(slot);
+            if self.keys.len() > SCAN {
+                return self.sort_many(sprites, key);
+            }
+        }
+        // The keys' ranks in order; then how many sprites have each rank, and where each
+        // rank's run starts.
+        self.ranks.clear();
+        self.ranks.extend(0..self.keys.len() as u32);
+        let keys = &self.keys;
+        self.ranks.sort_unstable_by_key(|&slot| keys[slot as usize]);
+        self.starts.clear();
+        self.starts.resize(self.keys.len(), 0);
+        for (rank, &slot) in self.ranks.iter().enumerate() {
+            self.starts[slot as usize] = rank as u32;
+        }
+        // `starts` maps first-seen slots to ranks; make `slots` hold ranks.
+        for slot in &mut self.slots {
+            *slot = self.starts[*slot as usize];
+        }
+        self.place(sprites.len());
+    }
+
+    /// The same sort for many distinct keys: they are sorted once, and each sprite's rank
+    /// is found by a binary search.
+    fn sort_many(&mut self, sprites: &[QueuedSprite], key: &impl Fn(&QueuedSprite) -> SortKey) {
+        self.keys.clear();
+        let mut last = None;
+        for sprite in sprites {
+            let k = key(sprite);
+            if last != Some(k) {
+                self.keys.push(k);
+                last = Some(k);
+            }
+        }
+        self.keys.sort_unstable();
+        self.keys.dedup();
+        self.slots.clear();
+        self.slots.extend(
+            sprites
+                .iter()
+                .map(|sprite| self.keys.binary_search(&key(sprite)).unwrap_or_default() as u32),
+        );
+        self.place(sprites.len());
+    }
+
+    /// Fills `order` from `slots`, each sprite's rank: a stable counting sort.
+    fn place(&mut self, len: usize) {
+        self.starts.clear();
+        self.starts.resize(self.keys.len(), 0);
+        for &rank in &self.slots {
+            self.starts[rank as usize] += 1;
+        }
+        let mut start = 0;
+        for count in &mut self.starts {
+            (*count, start) = (start, start + *count);
+        }
+        self.order.resize(len, 0);
+        for (i, &rank) in self.slots.iter().enumerate() {
+            let at = &mut self.starts[rank as usize];
+            self.order[*at as usize] = i as u32;
+            *at += 1;
         }
     }
 }
@@ -197,6 +298,31 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn sorting_keeps_queue_order_within_a_key() {
+        let (images, a, b) = images();
+        // Interleaved textures on a few layers, then on many (the sort's other path).
+        let mut batcher = Batcher::default();
+        for (layers, batches) in [(2, 4), (2, 4), (37, 74)] {
+            let queue: Vec<QueuedSprite> = (0..200)
+                .map(|i| {
+                    let texture = if i % 3 == 0 { a.clone() } else { b.clone() };
+                    let transform = Transform2D::from_xy(i as f32, 0.0);
+                    QueuedSprite::new(&Sprite::new(texture), transform, (i * 7) % layers)
+                })
+                .collect();
+            batcher.batches.clear();
+            batcher.append(&queue, &images, |q| (q.layer, q.texture));
+            let mut expected: Vec<usize> = (0..queue.len()).collect();
+            expected.sort_by_key(|&i| (queue[i].layer, queue[i].texture));
+            assert_eq!(
+                batcher.order,
+                expected.iter().map(|&i| i as u32).collect::<Vec<_>>()
+            );
+            assert_eq!(batcher.batches.len(), batches);
+        }
     }
 
     #[test]

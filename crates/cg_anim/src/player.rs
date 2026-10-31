@@ -226,6 +226,7 @@ impl PrefabComponent for SpriteAnimation {
 const MIN_FRAME: f32 = 1e-4;
 
 /// Advances every [`SpriteAnimation`] by one fixed step and shows its frame.
+#[profiling::function]
 pub(crate) fn play_animations(
     time: Res<Time>,
     sheets: Res<Assets<SpriteSheet>>,
@@ -299,6 +300,7 @@ pub(crate) fn play_animations(
 /// Shows the current frame of animations added or changed (a new clip, say) since the
 /// last frame, so they appear at once rather than at the next fixed step, even while the
 /// game is paused.
+#[profiling::function]
 pub(crate) fn show_changed_animations(
     sheets: Res<Assets<SpriteSheet>>,
     mut animations: Query<(&SpriteAnimation, &mut Sprite), Changed<SpriteAnimation>>,

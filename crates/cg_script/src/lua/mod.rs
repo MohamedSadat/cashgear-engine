@@ -8,9 +8,11 @@
 
 mod bindings;
 mod convert;
+mod require;
 
 use crate::script::{ScriptError, ScriptErrors, ScriptInfo, ScriptStatus};
 use crate::{LuaScript, Script, ScriptEvent, ScriptEvents, ScriptPlugin, ScriptSystems};
+use bevy_ecs::change_detection::Tick;
 use bevy_ecs::message::{MessageCursor, Messages};
 use bevy_ecs::prelude::*;
 use cg_assets::{AssetId, AssetServer, Assets};
@@ -21,14 +23,12 @@ use mlua::{HookTriggers, VmState};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
-/// The registry key of the world lent to Lua during a run.
-const WORLD: &str = "cg.world";
 /// The registry key of the entity methods table.
 const METHODS: &str = "cg.methods";
 /// The registry key of the metatable of `self` tables.
 const INSTANCE: &str = "cg.instance";
 /// The registry key of the metatable of each file's globals.
-const ENVIRONMENT: &str = "cg.env";
+pub(crate) const ENVIRONMENT: &str = "cg.env";
 /// Instructions between two checks of the budget.
 const BUDGET_STEP: u32 = 1000;
 /// Rounds of events delivered per run; events sent in the last round wait for the next.
@@ -44,11 +44,16 @@ pub(crate) fn build(app: &mut App, plugin: &ScriptPlugin) {
     }
 }
 
-/// An entity in Lua.
+/// An entity in Lua. Handed to Lua it is an [`EntityData`] userdata, one per entity while
+/// Lua holds it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct LuaEntity(pub Entity);
 
-impl LuaUserData for LuaEntity {
+/// The userdata of an entity in Lua.
+#[derive(Clone, Copy)]
+pub(crate) struct EntityData(pub Entity);
+
+impl LuaUserData for EntityData {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
         // Methods come from the shared table, which `self` tables use too.
         fields.add_meta_field_with("__index", |lua| {
@@ -64,15 +69,59 @@ impl LuaUserData for LuaEntity {
     }
 }
 
+/// The entities handed to Lua, by their bits, in a table with weak values: an entity is
+/// made into a userdata once and reused while Lua holds it, so raycasts and collisions do
+/// not make a new one each time.
+struct EntityCache(LuaTable);
+
+impl IntoLua for LuaEntity {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        let bits = self.0.to_bits() as i64;
+        let cache = lua.app_data_ref::<EntityCache>();
+        if let Some(cache) = &cache
+            && let LuaValue::UserData(ud) = cache.0.raw_get::<LuaValue>(bits)?
+        {
+            return Ok(LuaValue::UserData(ud));
+        }
+        let ud = lua.create_userdata(EntityData(self.0))?;
+        if let Some(cache) = &cache {
+            cache.0.raw_set(bits, &ud)?;
+        }
+        Ok(LuaValue::UserData(ud))
+    }
+}
+
+/// The key under which a `self` table keeps its entity's bits, so methods called on `self`
+/// find the entity without looking up a string key or borrowing a userdata.
+static ENTITY_KEY: u8 = 0;
+
+fn entity_key() -> LuaLightUserData {
+    LuaLightUserData(core::ptr::addr_of!(ENTITY_KEY).cast_mut().cast())
+}
+
+/// The key of the table `self:contacts()` fills, kept on `self`.
+static CONTACTS_KEY: u8 = 0;
+
+pub(crate) fn contacts_key() -> LuaLightUserData {
+    LuaLightUserData(core::ptr::addr_of!(CONTACTS_KEY).cast_mut().cast())
+}
+
 /// An entity, or a script's `self` (its entity).
 impl FromLua for LuaEntity {
     fn from_lua(value: LuaValue, _: &Lua) -> LuaResult<Self> {
         let ud = match value {
             LuaValue::UserData(ud) => ud,
-            LuaValue::Table(ref t) => match t.raw_get::<LuaValue>("entity")? {
-                LuaValue::UserData(ud) => ud,
-                _ => return Err(LuaError::runtime("expected an entity, got a table")),
-            },
+            LuaValue::Table(ref t) => {
+                if let LuaValue::Integer(bits) = t.raw_get::<LuaValue>(entity_key())?
+                    && let Some(entity) = Entity::try_from_bits(bits as u64)
+                {
+                    return Ok(LuaEntity(entity));
+                }
+                match t.raw_get::<LuaValue>("entity")? {
+                    LuaValue::UserData(ud) => ud,
+                    _ => return Err(LuaError::runtime("expected an entity, got a table")),
+                }
+            }
             other => {
                 return Err(LuaError::runtime(format!(
                     "expected an entity, got {}",
@@ -80,18 +129,24 @@ impl FromLua for LuaEntity {
                 )));
             }
         };
-        let entity = *ud
-            .borrow::<LuaEntity>()
-            .map_err(|_| LuaError::runtime("expected an entity, got other userdata"))?;
-        Ok(entity)
+        let entity = ud
+            .borrow::<EntityData>()
+            .map_err(|_| LuaError::runtime("expected an entity, got other userdata"))?
+            .0;
+        Ok(LuaEntity(entity))
     }
 }
 
+/// The world lent to Lua during a run, kept in the app data so the engine's functions find
+/// it with a type lookup rather than a registry key.
+struct LentWorld(Option<LuaAnyUserData>);
+
 /// Runs `f` with the world lent to Lua for this run.
 pub(crate) fn with_world<R>(lua: &Lua, f: impl FnOnce(&mut World) -> LuaResult<R>) -> LuaResult<R> {
-    match lua.named_registry_value::<LuaValue>(WORLD)? {
-        LuaValue::UserData(world) => world.borrow_mut_scoped::<World, _>(f)?,
-        _ => Err(LuaError::runtime(
+    let lent = lua.app_data_ref::<LentWorld>();
+    match lent.as_ref().and_then(|lent| lent.0.as_ref()) {
+        Some(world) => world.borrow_mut_scoped::<World, _>(f)?,
+        None => Err(LuaError::runtime(
             "the engine's functions work only inside hooks, not at a script's top level",
         )),
     }
@@ -138,6 +193,10 @@ struct Module {
     path: Rc<str>,
     /// The asset version compiled (or tried).
     version: u64,
+    /// The files it required, at the versions it was compiled with.
+    deps: Vec<(AssetId<LuaScript>, u64)>,
+    /// A file it requires was still loading: compile it again.
+    waiting: bool,
     /// Its hooks, from the last version that compiled.
     hooks: Option<LuaTable>,
     error: Option<String>,
@@ -161,10 +220,16 @@ pub(crate) struct LuaRuntime {
     modules: HashMap<AssetId<LuaScript>, Module>,
     instances: Vec<Instance>,
     index: HashMap<Entity, usize>,
-    scripted: Option<QueryState<(Entity, &'static Script)>>,
+    scripted: Option<QueryState<(Entity, Ref<'static, Script>)>>,
+    /// The change tick of the last time the scripted entities were gathered.
+    gathered: Option<Tick>,
     api_version: Option<u64>,
     started: MessageCursor<CollisionStarted>,
     ended: MessageCursor<CollisionEnded>,
+    /// This run's collisions (started or not, and the pair) and due timers, in lists kept
+    /// between runs for their memory.
+    collisions: Vec<(bool, Entity, Entity)>,
+    due: Vec<Timer>,
     step: u64,
     calls: u32,
     changed: bool,
@@ -186,6 +251,14 @@ impl LuaRuntime {
         lua.load("math.randomseed(20261030)").exec()?;
         lua.set_app_data(Current::default());
         lua.set_app_data(Timers::default());
+        lua.set_app_data(LentWorld(None));
+        let entities = lua.create_table()?;
+        let weak = lua.create_table()?;
+        weak.raw_set("__mode", "v")?;
+        entities.set_metatable(Some(weak))?;
+        lua.set_app_data(EntityCache(entities));
+        lua.set_app_data(require::CompileWorld(None));
+        lua.set_app_data(require::RequireState::default());
         let max = (plugin.max_instructions / BUDGET_STEP).max(1);
         lua.set_app_data(Budget { left: max, max });
         lua.set_hook(
@@ -221,15 +294,19 @@ impl LuaRuntime {
         env.raw_set("__index", &globals)?;
         lua.set_named_registry_value(ENVIRONMENT, env)?;
         bindings::install(&lua, &methods)?;
+        globals.raw_set("require", lua.create_function(require::require)?)?;
         Ok(Self {
             lua,
             modules: HashMap::new(),
             instances: Vec::new(),
             index: HashMap::new(),
             scripted: None,
+            gathered: None,
             api_version: None,
             started: MessageCursor::default(),
             ended: MessageCursor::default(),
+            collisions: Vec::new(),
+            due: Vec::new(),
             step: 0,
             calls: 0,
             changed: true,
@@ -246,6 +323,35 @@ impl LuaRuntime {
                 log::error!("cannot add the game's script functions: {err}");
             }
         }
+        // Nothing to gather when no `Script` came, went or changed and no file changed:
+        // a steady run allocates nothing here.
+        let now = world.read_change_tick();
+        let query = self.scripted.get_or_insert_with(|| world.query());
+        let mut count = 0;
+        let mut changed = self.gathered.is_none();
+        for (_, script) in query.iter(world) {
+            count += 1;
+            changed |= self
+                .gathered
+                .is_some_and(|tick| script.last_changed().is_newer_than(tick, now));
+        }
+        let scripts = world.resource::<Assets<LuaScript>>();
+        let outdated =
+            |id: &AssetId<LuaScript>, version: u64| scripts.version(*id) != Some(version);
+        changed |= self.modules.iter().any(|(id, module)| {
+            module.waiting
+                || outdated(id, module.version)
+                || module
+                    .deps
+                    .iter()
+                    .any(|(dep, version)| outdated(dep, *version))
+        });
+        if !changed && count == self.instances.len() {
+            return;
+        }
+        // Changes made from here on (scripts spawning scripted entities) are newer.
+        self.gathered = Some(world.increment_change_tick());
+
         // Which entities run which file.
         let query = self.scripted.get_or_insert_with(|| world.query());
         let scripted: Vec<(Entity, AssetId<LuaScript>)> =
@@ -283,7 +389,7 @@ impl LuaRuntime {
                 !known.contains(e) && self.modules.get(id).is_some_and(|m| m.hooks.is_some())
             })
             .collect();
-        fresh.sort_by_key(|(e, _)| e.index_u32());
+        fresh.sort_unstable_by_key(|(e, _)| e.index_u32());
         for (entity, script) in fresh {
             match self.new_instance(entity) {
                 Ok(this) => self.instances.push(Instance {
@@ -311,6 +417,7 @@ impl LuaRuntime {
     fn new_instance(&self, entity: Entity) -> LuaResult<LuaTable> {
         let this = self.lua.create_table()?;
         this.raw_set("entity", LuaEntity(entity))?;
+        this.raw_set(entity_key(), entity.to_bits() as i64)?;
         this.set_metatable(Some(self.lua.named_registry_value::<LuaTable>(INSTANCE)?))?;
         Ok(this)
     }
@@ -321,7 +428,13 @@ impl LuaRuntime {
         let (Some(script), Some(version)) = (scripts.get(id), scripts.version(id)) else {
             return; // Still loading (or failed to load, which the asset server reports).
         };
-        if self.modules.get(&id).is_some_and(|m| m.version == version) {
+        let outdated =
+            |(dep, version): &(AssetId<LuaScript>, u64)| scripts.version(*dep) != Some(*version);
+        if self
+            .modules
+            .get(&id)
+            .is_some_and(|m| m.version == version && !m.waiting && !m.deps.iter().any(outdated))
+        {
             return;
         }
         let path: Rc<str> = world
@@ -330,15 +443,24 @@ impl LuaRuntime {
             .map_or_else(|| format!("script {id:?}").into(), Into::into);
         let source = script.source().to_owned();
         self.changed = true;
-        let result = self.compile(&path, &source);
+        let (result, deps) = self.compile(world, &path, &source);
+        let waiting = result.is_err() && require::pending(&self.lua);
         let module = self.modules.entry(id).or_insert_with(|| Module {
             path: path.clone(),
             version,
+            deps: Vec::new(),
+            waiting: false,
             hooks: None,
             error: None,
             loads: 0,
         });
         module.version = version;
+        module.deps = deps;
+        module.waiting = waiting;
+        if waiting {
+            // A file it requires is still loading; try again in the next run.
+            return;
+        }
         match result {
             Ok(hooks) => {
                 let reload = module.hooks.is_some();
@@ -366,25 +488,44 @@ impl LuaRuntime {
         }
     }
 
-    fn compile(&self, path: &str, source: &str) -> LuaResult<LuaTable> {
-        let env = self.lua.create_table()?;
-        env.set_metatable(Some(
-            self.lua.named_registry_value::<LuaTable>(ENVIRONMENT)?,
-        ))?;
+    /// Runs a file's top level, which returns its hooks; the world is lent to `require`
+    /// meanwhile. Also returns the files it required.
+    fn compile(
+        &self,
+        world: &mut World,
+        path: &str,
+        source: &str,
+    ) -> (LuaResult<LuaTable>, Vec<(AssetId<LuaScript>, u64)>) {
         self.reset_budget();
-        let value: LuaValue = self
-            .lua
-            .load(source)
-            .set_name(format!("@{path}"))
-            .set_environment(env)
-            .eval()?;
-        match value {
+        require::begin_compile(&self.lua);
+        let lua = &self.lua;
+        let result = lua.scope(|scope| {
+            let lent = scope.create_any_userdata_ref_mut(world)?;
+            if let Some(mut compile) = lua.app_data_mut::<require::CompileWorld>() {
+                compile.0 = Some(lent);
+            }
+            let result = (|| {
+                let env = lua.create_table()?;
+                env.set_metatable(Some(lua.named_registry_value::<LuaTable>(ENVIRONMENT)?))?;
+                lua.load(source)
+                    .set_name(format!("@{path}"))
+                    .set_environment(env)
+                    .eval::<LuaValue>()
+            })();
+            if let Some(mut compile) = lua.app_data_mut::<require::CompileWorld>() {
+                compile.0 = None;
+            }
+            result
+        });
+        let deps = require::end_compile(&self.lua);
+        let hooks = result.and_then(|value| match value {
             LuaValue::Table(hooks) => Ok(hooks),
             other => Err(LuaError::runtime(format!(
                 "{path}: the file must return a table of hooks, not {}",
                 other.type_name()
             ))),
-        }
+        });
+        (hooks, deps)
     }
 
     fn reset_budget(&self) {
@@ -431,26 +572,29 @@ impl LuaRuntime {
                 self.deliver(world, event)?;
             }
         }
-        let (started, ended) = world.borrow_mut_scoped::<World, _>(|world| {
-            let started: Vec<(Entity, Entity)> = world
-                .get_resource::<Messages<CollisionStarted>>()
-                .map(|m| self.started.read(m).map(|c| (c.0, c.1)).collect())
-                .unwrap_or_default();
-            let ended: Vec<(Entity, Entity)> = world
-                .get_resource::<Messages<CollisionEnded>>()
-                .map(|m| self.ended.read(m).map(|c| (c.0, c.1)).collect())
-                .unwrap_or_default();
-            (started, ended)
+        let mut collisions = core::mem::take(&mut self.collisions);
+        collisions.clear();
+        world.borrow_mut_scoped::<World, _>(|world| {
+            if let Some(messages) = world.get_resource::<Messages<CollisionStarted>>() {
+                collisions.extend(self.started.read(messages).map(|c| (true, c.0, c.1)));
+            }
+            if let Some(messages) = world.get_resource::<Messages<CollisionEnded>>() {
+                collisions.extend(self.ended.read(messages).map(|c| (false, c.0, c.1)));
+            }
         })?;
-        for (hook, pairs) in [("on_collision", started), ("on_collision_end", ended)] {
-            for (a, b) in pairs {
-                for (me, other) in [(a, b), (b, a)] {
-                    if let Some(&i) = self.index.get(&me) {
-                        self.call(world, i, hook, LuaEntity(other))?;
-                    }
+        for &(started, a, b) in &collisions {
+            let hook = if started {
+                "on_collision"
+            } else {
+                "on_collision_end"
+            };
+            for (me, other) in [(a, b), (b, a)] {
+                if let Some(&i) = self.index.get(&me) {
+                    self.call(world, i, hook, LuaEntity(other))?;
                 }
             }
         }
+        self.collisions = collisions;
         self.fire_timers(world)?;
         for i in 0..self.instances.len() {
             self.call(world, i, "on_update", dt)?;
@@ -472,18 +616,18 @@ impl LuaRuntime {
     }
 
     fn fire_timers(&mut self, world: &LuaAnyUserData) -> LuaResult<()> {
-        let due: Vec<Timer> = {
+        let mut due = core::mem::take(&mut self.due);
+        {
             let Some(mut timers) = self.lua.app_data_mut::<Timers>() else {
+                self.due = due;
                 return Ok(());
             };
             let step = self.step;
-            let (mut due, keep): (Vec<Timer>, Vec<Timer>) =
-                timers.list.drain(..).partition(|t| t.due <= step);
-            timers.list = keep;
-            due.sort_by_key(|t| (t.due, t.id));
-            due
-        };
-        for mut timer in due {
+            due.extend(timers.list.extract_if(.., |t| t.due <= step));
+        }
+        // Timer ids are unique, so the in-place sort keeps the order they were made in.
+        due.sort_unstable_by_key(|t| (t.due, t.id));
+        for mut timer in due.drain(..) {
             let owner = match &timer.owner {
                 Some((entity, _)) => match self.index.get(entity) {
                     Some(&i) if !self.instances[i].failed => Some(i),
@@ -525,6 +669,7 @@ impl LuaRuntime {
                 }
             }
         }
+        self.due = due;
         if let Some(mut timers) = self.lua.app_data_mut::<Timers>() {
             timers.cancelled.clear();
         }
@@ -710,6 +855,7 @@ fn describe(err: &LuaError) -> String {
 }
 
 /// The scripts' run in `FixedUpdate`.
+#[profiling::function]
 fn run(world: &mut World) {
     let Some(mut runtime) = world.remove_non_send::<LuaRuntime>() else {
         return;
@@ -718,9 +864,13 @@ fn run(world: &mut World) {
     let lua = runtime.lua.clone();
     let result = lua.scope(|scope| {
         let lent = scope.create_any_userdata_ref_mut(world)?;
-        lua.set_named_registry_value(WORLD, &lent)?;
+        if let Some(mut slot) = lua.app_data_mut::<LentWorld>() {
+            slot.0 = Some(lent.clone());
+        }
         let result = runtime.run_hooks(&lent);
-        lua.set_named_registry_value(WORLD, LuaNil)?;
+        if let Some(mut slot) = lua.app_data_mut::<LentWorld>() {
+            slot.0 = None;
+        }
         result
     });
     if let Err(err) = result {

@@ -256,11 +256,15 @@ impl Locale {
 
     /// Rebuilds the merged table when the language or a strings file changed.
     pub(crate) fn rebuild(&mut self, strings: &Assets<Strings>) {
-        let key = (self.current.clone(), strings.revision());
-        if self.built.as_ref() == Some(&key) {
+        let revision = strings.revision();
+        if self
+            .built
+            .as_ref()
+            .is_some_and(|(language, built)| *language == self.current && *built == revision)
+        {
             return;
         }
-        self.built = Some(key);
+        self.built = Some((self.current.clone(), revision));
         let find = |code: &str| {
             self.files
                 .iter()
@@ -416,6 +420,7 @@ pub(crate) fn update_locale(mut locale: ResMut<Locale>, strings: Res<Assets<Stri
 }
 
 /// Sets localized texts' strings, fonts and sizes from the locale.
+#[profiling::function]
 pub(crate) fn apply_localized(
     locale: Res<Locale>,
     mut texts: Query<(&mut Localized, &mut Text)>,

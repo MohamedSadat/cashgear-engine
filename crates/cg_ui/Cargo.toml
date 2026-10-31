@@ -14,6 +14,8 @@ default = ["debug-overlay"]
 # debug drawing toggles.
 # With bevy's `debug` feature the inspector can name component types.
 debug-overlay = ["dep:egui", "dep:egui-wgpu", "bevy_ecs/debug"]
+# Profiling with puffin, and with `debug-overlay` the overlay's Profiler window.
+profile = ["cg_core/profile", "dep:puffin"]
 
 [dependencies]
 # Direct dependency so bevy's derive macros (`Component`) can find `bevy_ecs`.
@@ -29,6 +31,8 @@ cosmic-text.workspace = true
 egui = { workspace = true, optional = true }
 egui-wgpu = { workspace = true, optional = true }
 log.workspace = true
+profiling.workspace = true
+puffin = { workspace = true, optional = true }
 # String tables and font settings.
 ron.workspace = true
 serde.workspace = true

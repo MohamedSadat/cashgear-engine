@@ -330,6 +330,7 @@ impl Painter {
         if self.texture_revision == Some(images.revision()) {
             return;
         }
+        profiling::scope!("sync textures");
         self.textures.retain(|id, _| images.contains(*id));
         for (id, image, version) in images.iter_versions() {
             if self
@@ -407,60 +408,70 @@ impl Painter {
         let view_proj = input.view.view_projection(viewport.world_size);
 
         // Build this frame's geometry.
-        self.batcher
-            .build(input.sprites, input.screen_sprites, input.images);
-        self.shape_vertices.clear();
-        if letterbox {
-            // The letterbox background: a quad covering the viewport, under everything.
-            let fill = [
-                (-1.0, -1.0),
-                (1.0, -1.0),
-                (1.0, 1.0),
-                (-1.0, -1.0),
-                (1.0, 1.0),
-                (-1.0, 1.0),
-            ];
-            let color = camera.clear_color.to_array();
-            self.shape_vertices.extend(fill.map(|(x, y)| ShapeVertex {
-                position: [x, y],
-                color,
-            }));
+        {
+            profiling::scope!("batch sprites");
+            self.batcher
+                .build(input.sprites, input.screen_sprites, input.images);
         }
-        let fill_vertices = self.shape_vertices.len() as u32;
-        let world_per_pixel = viewport.world_size.x / rect.width().max(1.0);
-        tessellate(
-            input.shapes.shapes(),
-            world_per_pixel,
-            input.scale_factor,
-            &mut self.shape_vertices,
-        );
-        let shape_vertices = self.shape_vertices.len() as u32;
+        let (fill_vertices, shape_vertices) = {
+            profiling::scope!("tessellate shapes");
+            self.shape_vertices.clear();
+            if letterbox {
+                // The letterbox background: a quad covering the viewport, under everything.
+                let fill = [
+                    (-1.0, -1.0),
+                    (1.0, -1.0),
+                    (1.0, 1.0),
+                    (-1.0, -1.0),
+                    (1.0, 1.0),
+                    (-1.0, 1.0),
+                ];
+                let color = camera.clear_color.to_array();
+                self.shape_vertices.extend(fill.map(|(x, y)| ShapeVertex {
+                    position: [x, y],
+                    color,
+                }));
+            }
+            let fill_vertices = self.shape_vertices.len() as u32;
+            let world_per_pixel = viewport.world_size.x / rect.width().max(1.0);
+            tessellate(
+                input.shapes.shapes(),
+                world_per_pixel,
+                input.scale_factor,
+                &mut self.shape_vertices,
+            );
+            (fill_vertices, self.shape_vertices.len() as u32)
+        };
 
         // Upload it.
-        let size = viewport.render_size;
-        let views = [
-            (
-                View::Sprites,
-                ViewUniform::new(view_proj, size, camera.pixel_snap),
-            ),
-            (View::Shapes, ViewUniform::new(view_proj, size, false)),
-            (View::Fill, ViewUniform::new(Mat4::IDENTITY, size, false)),
-            (
-                View::Screen,
-                ViewUniform::new(screen_projection(input, target_size), target_size, true),
-            ),
-        ];
-        for (view, value) in views {
-            self.views.write(queue, view, value);
-        }
-        self.instances
-            .write(device, queue, bytemuck::cast_slice(&self.batcher.instances));
-        self.vertices
-            .write(device, queue, bytemuck::cast_slice(&self.shape_vertices));
-        if pixel_perfect && has_view {
-            self.ensure_pixel_target(device, viewport.render_size);
+        {
+            profiling::scope!("upload");
+            let size = viewport.render_size;
+            let views = [
+                (
+                    View::Sprites,
+                    ViewUniform::new(view_proj, size, camera.pixel_snap),
+                ),
+                (View::Shapes, ViewUniform::new(view_proj, size, false)),
+                (View::Fill, ViewUniform::new(Mat4::IDENTITY, size, false)),
+                (
+                    View::Screen,
+                    ViewUniform::new(screen_projection(input, target_size), target_size, true),
+                ),
+            ];
+            for (view, value) in views {
+                self.views.write(queue, view, value);
+            }
+            self.instances
+                .write(device, queue, bytemuck::cast_slice(&self.batcher.instances));
+            self.vertices
+                .write(device, queue, bytemuck::cast_slice(&self.shape_vertices));
+            if pixel_perfect && has_view {
+                self.ensure_pixel_target(device, viewport.render_size);
+            }
         }
 
+        profiling::scope!("encode");
         let mut stats = FrameStats {
             sprites: self.batcher.instances.len() as u32,
             batches: self.batcher.batches.len() as u32,
@@ -529,6 +540,7 @@ impl Painter {
         }
 
         if let Some(overlays) = overlays {
+            profiling::scope!("overlays");
             for overlay in overlays.iter_mut() {
                 overlay.draw(&mut OverlayFrame {
                     device,
@@ -543,7 +555,10 @@ impl Painter {
             }
         }
 
-        queue.submit([encoder.finish()]);
+        {
+            profiling::scope!("submit");
+            queue.submit([encoder.finish()]);
+        }
         stats
     }
 

@@ -468,6 +468,7 @@ impl Default for ParticleBudget {
 
 /// Simulates every emitter for one frame, emits within the budget, and despawns finished
 /// one-shot emitters.
+#[profiling::function]
 pub(crate) fn update_particles(
     mut commands: Commands,
     time: Res<Time>,
@@ -525,6 +526,7 @@ pub(crate) fn update_particles(
 }
 
 /// Queues the particles of every visible emitter whose particles reach into the view.
+#[profiling::function]
 pub(crate) fn queue_particles(
     emitters: Query<(
         Entity,

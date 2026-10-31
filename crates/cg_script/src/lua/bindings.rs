@@ -3,7 +3,7 @@
 //! through [`with_world`], so they work only inside hooks.
 
 use super::convert::{self, color, number, vector};
-use super::{Current, LuaEntity, Timer, Timers, with_world};
+use super::{Current, EntityData, LuaEntity, Timer, Timers, contacts_key, with_world};
 use crate::api::StateOp;
 use crate::{ScriptApi, ScriptEvent, ScriptEvents, ScriptMessage};
 use bevy_ecs::component::Mutable;
@@ -358,9 +358,28 @@ fn entity_methods(lua: &Lua, m: &LuaTable) -> LuaResult<()> {
             Ok(())
         },
     )?;
-    method(lua, m, "contacts", |lua, w, e, ()| {
+    // `self:contacts()` refills one table kept on `self`, so a script that asks every
+    // step makes no garbage; other entities' contacts come in a new table.
+    let contacts = lua.create_function(|lua, this: LuaValue| {
+        let entity = LuaEntity::from_lua(this.clone(), lua)?.0;
+        let table = match &this {
+            LuaValue::Table(this) => match this.raw_get::<LuaValue>(contacts_key())? {
+                LuaValue::Table(kept) => kept,
+                _ => {
+                    let kept = lua.create_table_with_capacity(0, 8)?;
+                    this.raw_set(contacts_key(), &kept)?;
+                    kept
+                }
+            },
+            _ => lua.create_table_with_capacity(0, 8)?,
+        };
+        with_world(lua, |w| Ok(fill_contacts(w, entity, &table)))?
+            .map_err(|message| LuaError::runtime(format!("contacts: {message}")))?;
+        Ok(table)
+    })?;
+    m.raw_set("contacts", contacts)?;
+    fn fill_contacts(w: &mut World, e: Entity, t: &LuaTable) -> Res<()> {
         let c = get::<KinematicContacts>(w, e, "KinematicBody")?;
-        let t = lua.create_table_with_capacity(0, 8).map_err(lua_err)?;
         let set = |key: &str, value: bool| t.raw_set(key, value).map_err(lua_err);
         set("ground", c.on_ground())?;
         set("ceiling", c.on_ceiling())?;
@@ -370,8 +389,8 @@ fn entity_methods(lua: &Lua, m: &LuaTable) -> LuaResult<()> {
         set("slope", c.on_slope())?;
         set("landed", c.just_landed())?;
         set("left_ground", c.just_left_ground())?;
-        Ok(t)
-    })?;
+        Ok(())
+    }
 
     // The sprite and its animation.
     method(lua, m, "flip_x", |_, w, e, ()| {
@@ -467,7 +486,7 @@ fn entity_methods(lua: &Lua, m: &LuaTable) -> LuaResult<()> {
         let f = lua.create_function(
             move |lua, (this, seconds, callback): (LuaTable, f32, LuaFunction)| {
                 let entity = match this.raw_get::<LuaValue>("entity")? {
-                    LuaValue::UserData(ud) => ud.borrow::<LuaEntity>().map(|e| e.0).ok(),
+                    LuaValue::UserData(ud) => ud.borrow::<EntityData>().map(|e| e.0).ok(),
                     _ => None,
                 }
                 .ok_or_else(|| {
@@ -658,7 +677,8 @@ fn world_table(lua: &Lua) -> LuaResult<LuaTable> {
             let Some(hit) = hit else {
                 return Ok(None);
             };
-            let t = lua.create_table().map_err(lua_err)?;
+            // Sized for its fields up front, so filling it does not grow it step by step.
+            let t = lua.create_table_with_capacity(0, 9).map_err(lua_err)?;
             let fill = || -> LuaResult<()> {
                 t.raw_set("entity", LuaEntity(hit.entity))?;
                 t.raw_set("x", hit.point.x)?;
@@ -686,7 +706,7 @@ fn world_table(lua: &Lua) -> LuaResult<LuaTable> {
             let Some(hit) = spatial(w, |q| q.tile_at(vec2(x, y), filter))? else {
                 return Ok(None);
             };
-            let t = lua.create_table().map_err(lua_err)?;
+            let t = lua.create_table_with_capacity(0, 7).map_err(lua_err)?;
             let fill = || -> LuaResult<()> {
                 t.raw_set("entity", LuaEntity(hit.entity))?;
                 t.raw_set("cx", hit.cell.x)?;

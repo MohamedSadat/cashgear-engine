@@ -250,6 +250,7 @@ impl GilrsContext {
 }
 
 /// Drains `gilrs` events into [`Gamepads`].
+#[profiling::function]
 pub(crate) fn poll_gamepads(
     context: Option<NonSendMut<GilrsContext>>,
     mut gamepads: ResMut<Gamepads>,

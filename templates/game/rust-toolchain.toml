@@ -1,0 +1,6 @@
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
+# The web, and Android: arm64 phones, older 32-bit ones, and x86_64 emulators.
+targets = ["wasm32-unknown-unknown", "aarch64-linux-android", "armv7-linux-androideabi", "x86_64-linux-android"]

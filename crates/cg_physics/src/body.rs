@@ -302,7 +302,7 @@ fn follow_platforms(
     }
     // The furthest push from solid colliders that came in from the side in this step.
     let mut push = 0.0f32;
-    let mut buffer = Vec::new();
+    let mut buffer = env.world.scratch();
     for entry in env.world.near(rect, &mut buffer) {
         if !entry.is_solid() || entry.motion.x == 0.0 || !layers.interacts(entry.layers) {
             continue;
@@ -446,8 +446,7 @@ impl Mover<'_, '_> {
 
 /// The steepest slope tile near the bottom of `span`, over every grid it interacts with.
 fn steepest_slope_near(env: &Env, layers: CollisionLayers, span: Rect) -> f32 {
-    env.grids
-        .iter()
+    env.grids()
         .filter(|grid| layers.interacts(grid.layers))
         .map(|grid| grid.grid.steepest_slope_near(shifted(span, -grid.offset)))
         .fold(0.0, f32::max)
@@ -471,7 +470,7 @@ fn sweep_x(
     let normal = vec2(-dx.signum(), 0.0);
     let mut allowed = dx;
     let mut hit = None;
-    for grid in &env.grids {
+    for grid in env.grids() {
         if !layers.interacts(grid.layers) {
             continue;
         }
@@ -490,7 +489,7 @@ fn sweep_x(
         min: vec2(probe.min.x.min(probe.min.x + dx), probe.min.y),
         max: vec2(probe.max.x.max(probe.max.x + dx), probe.max.y),
     };
-    let mut buffer = Vec::new();
+    let mut buffer = env.world.scratch();
     for entry in env.world.near(span, &mut buffer) {
         if !entry.is_solid() || !layers.interacts(entry.layers) {
             continue;
@@ -526,7 +525,7 @@ fn sweep_x(
 fn sweep_up(env: &Env, layers: CollisionLayers, rect: Rect, dy: f32) -> (f32, Option<Contact>) {
     let mut allowed = dy;
     let mut hit = None;
-    for grid in &env.grids {
+    for grid in env.grids() {
         if !layers.interacts(grid.layers) {
             continue;
         }
@@ -545,7 +544,7 @@ fn sweep_up(env: &Env, layers: CollisionLayers, rect: Rect, dy: f32) -> (f32, Op
         min: rect.min,
         max: rect.max + vec2(0.0, dy),
     };
-    let mut buffer = Vec::new();
+    let mut buffer = env.world.scratch();
     for entry in env.world.near(span, &mut buffer) {
         if !entry.is_solid() || !layers.interacts(entry.layers) {
             continue;
@@ -589,7 +588,7 @@ fn find_floor(
             best = Some(Floor { height, contact });
         }
     };
-    for grid in &env.grids {
+    for grid in env.grids() {
         if !layers.interacts(grid.layers) {
             continue;
         }
@@ -616,7 +615,7 @@ fn find_floor(
         min: vec2(rect.min.x, lo),
         max: vec2(rect.max.x, hi_flat.max(rect.max.y)),
     };
-    let mut buffer = Vec::new();
+    let mut buffer = env.world.scratch();
     for entry in env.world.near(span, &mut buffer) {
         if !entry.is_static() || (entry.one_way && !one_way) || !layers.interacts(entry.layers) {
             continue;
@@ -650,7 +649,7 @@ fn touches_hazard(
     rect: Rect,
     contacts: &KinematicContacts,
 ) -> bool {
-    let overlapped = env.grids.iter().any(|grid| {
+    let overlapped = env.grids().any(|grid| {
         layers.interacts(grid.layers) && grid.grid.hazard_in(shifted(rect, -grid.offset)).is_some()
     });
     let touched = [

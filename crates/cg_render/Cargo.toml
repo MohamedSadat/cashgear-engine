@@ -18,6 +18,7 @@ cg_platform.workspace = true
 cg_world.workspace = true
 image.workspace = true
 log.workspace = true
+profiling.workspace = true
 # Texture atlas files.
 ron.workspace = true
 serde.workspace = true

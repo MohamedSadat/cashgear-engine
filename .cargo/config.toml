@@ -1,13 +1,13 @@
 [alias]
 # The wasm check run at the start and end of every phase.
-# Desktop-only tools (and the platformer's editor) are excluded.
-check-wasm = "check --workspace --target wasm32-unknown-unknown --exclude cg_editor --exclude platformer_editor --exclude cg_pack"
+# Desktop-only tools, the platformer's editor and the benchmarks are excluded.
+check-wasm = "check --workspace --target wasm32-unknown-unknown --exclude cg_editor --exclude platformer_editor --exclude cg_pack --exclude cg_bench"
 # The same, linted with warnings denied, so wasm-only code paths are held to the desktop bar.
 # CI runs this one.
-clippy-wasm = "clippy --workspace --target wasm32-unknown-unknown --exclude cg_editor --exclude platformer_editor --exclude cg_pack -- -D warnings"
+clippy-wasm = "clippy --workspace --target wasm32-unknown-unknown --exclude cg_editor --exclude platformer_editor --exclude cg_pack --exclude cg_bench -- -D warnings"
 # The same for Android (arm64 phones), from Phase 11. Through cargo-ndk from Phase 12:
 # Lua's C sources (cg_script) need the NDK's clang even to check, and cargo-ndk finds it
 # (ANDROID_NDK_HOME, or the newest NDK under ANDROID_HOME). See
 # games/platformer/android/README.md.
-check-android = "ndk -t arm64-v8a -P 26 check --workspace --exclude cg_editor --exclude platformer_editor --exclude cg_pack"
-clippy-android = "ndk -t arm64-v8a -P 26 clippy --workspace --exclude cg_editor --exclude platformer_editor --exclude cg_pack -- -D warnings"
+check-android = "ndk -t arm64-v8a -P 26 check --workspace --exclude cg_editor --exclude platformer_editor --exclude cg_pack --exclude cg_bench"
+clippy-android = "ndk -t arm64-v8a -P 26 clippy --workspace --exclude cg_editor --exclude platformer_editor --exclude cg_pack --exclude cg_bench -- -D warnings"

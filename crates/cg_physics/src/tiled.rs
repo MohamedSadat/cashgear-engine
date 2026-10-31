@@ -138,6 +138,7 @@ fn tile_cell(properties: &Properties, tile: LayerTile, tile_height: f32) -> (Til
 
 /// Gives each [`Tilemap`] a [`TileCollider`] from its map's collision layers, again
 /// whenever the map changes.
+#[profiling::function]
 pub(crate) fn build_tile_colliders(
     mut commands: Commands,
     tilemaps: Query<(Entity, &Tilemap, Option<&TilemapCollision>)>,
@@ -204,6 +205,7 @@ type NewObjectsWithoutCollider = (Added<TiledObject>, Without<Collider>);
 /// Gives map objects whose `collider` or `sensor` property is `true` a [`Collider`] of
 /// their shape (and a [`Sensor`] for `sensor`, a [`OneWay`] for `one_way`), unless a prefab
 /// already gave them one.
+#[profiling::function]
 pub(crate) fn add_object_colliders(
     mut commands: Commands,
     objects: Query<(Entity, &TiledObject), NewObjectsWithoutCollider>,

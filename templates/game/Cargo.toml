@@ -1,0 +1,47 @@
+[workspace]
+resolver = "3"
+# The game, its Android library and the game with the scene editor built in.
+members = [".", "android", "editor"]
+
+[workspace.dependencies]
+# The engine, at the release this game was made from. Change the tag to upgrade (the
+# engine's CHANGELOG.md says what changed). Lua scripts run on desktop and Android.
+cashgear_engine = { git = "https://github.com/MohamedSadat/cashgear-engine", tag = "v0.1.0", default-features = false, features = ["script"] }
+cg_editor = { git = "https://github.com/MohamedSadat/cashgear-engine", tag = "v0.1.0" }
+
+[package]
+name = "{{crate_name}}"
+description = "{{title}}, a game made with CashGear Engine."
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[features]
+default = ["overlay"]
+# The F12 debug overlay (egui). Web and Android releases leave it out.
+overlay = ["cashgear_engine/debug-overlay"]
+
+[dependencies]
+cashgear_engine.workspace = true
+
+# Dependencies (the engine, wgpu, bevy_ecs...) are optimised even in debug builds, so the
+# game runs near full speed while you work on it; your own code builds quickly.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# Web releases (`trunk build --release`): small code, then wasm-opt.
+[profile.web-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+
+# Android releases (the Gradle build's release variant).
+[profile.android-release]
+inherits = "release"
+lto = true
+codegen-units = 1
+strip = "debuginfo"

@@ -64,6 +64,7 @@ impl TileAnimation {
 }
 
 /// Shows the current frame on every animated tile object.
+#[profiling::function]
 pub(crate) fn animate_tile_objects(
     time: Res<Time>,
     mut tiles: Query<(&TileAnimation, &mut Sprite)>,

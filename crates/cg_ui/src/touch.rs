@@ -167,6 +167,7 @@ pub(crate) struct TouchState {
 /// Shows or hides the controls from the kind of input in use, then presses the actions
 /// under the fingers. Runs in `PreUpdate` before the actions are evaluated.
 #[allow(clippy::too_many_arguments)]
+#[profiling::function]
 pub(crate) fn update_touch_controls(
     mut controls: ResMut<TouchControls>,
     window: Res<Window>,

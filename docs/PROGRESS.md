@@ -20,7 +20,8 @@ This file tracks phase status, the decisions made at the start of each phase, kn
 | 11 | Android build | Done | `phase-11` |
 | 12 | Lua scripting | Done | `phase-12` |
 | 13 | Scene editor | Done | `phase-13` |
-| 14 | Polish, performance and release | Next | |
+| 14 | Polish, performance and release | Done | `phase-14`, `v0.1.0` |
+| 15 | Field testing and 0.2 | Next | |
 
 ## Phase 0 — Repository and workspace
 
@@ -902,6 +903,81 @@ Other choices made during the phase:
 - `cargo run -p cg_editor -- --asset-root examples/scripting/assets maps/playground.tmx`, then Play: the crates fall and the blocks patrol.
 - On Linux or macOS, if you have one: the same commands.
 
+## Phase 14 — Polish, performance and release
+
+### Decisions
+
+| Question | Answer |
+| --- | --- |
+| crates.io | Not now. `publish = false` stays; games depend on the engine through git and a release tag (`tag = "v0.1.0"`). The `cashgear_engine` and `cg_*` names were all still free on crates.io when checked. |
+| Release builds of the sample game | Windows (a zip of the executable and its asset bundle), the web (a zip for itch.io and any static host; Pages keeps deploying from `main`) and Android (an APK and an AAB). No Linux or macOS builds. Windows builds are unsigned (no code-signing certificate); Android builds are signed when the repository has the keystore secrets. |
+| Versioning and the first release | One version for every crate, SemVer 0.x from 0.1.0 (a minor bump may break games). `v0.1.0` is tagged at the end of this phase, with `phase-14`; the tag runs the release workflow, which publishes the GitHub Release. |
+| Items carried over from earlier phases | Cheaper Lua engine calls and `require`. Not taken: a content-hashed web bundle name, Play Store extras (debug symbols, an icon foreground), and loading on a worker thread on desktop; they stay in the backlog. |
+
+Chosen without asking (said with the questions):
+
+- **The profiler** is the `profiling` crate's scopes, recorded by puffin (feature `profile`) and shown in a Profiler window in the F12 overlay, written for egui 0.37 (puffin's own viewer, `puffin_egui` 0.30, needs egui 0.33). It works on desktop, the web and Android. Tracy is the `profile-tracy` feature, desktop only.
+- **Benchmarks in CI:** an allocation test that fails on any heap allocation in steady frames of the sprite, level and menu scenes; timed criterion benchmarks (dev-only, no plots) reported in the job summary without failing on them.
+- **Docs:** the mdBook guide in `docs/book`, published with the API docs on GitHub Pages under `/book/` and `/api/`; the game stays at the root. The guide's code excerpts are the template's own code, through mdBook's `{{#include}}` and `ANCHOR` markers.
+- **The template** lives in this repository, `templates/game`, for `cargo generate --git ... templates/game`: a small complete game with web, Android and editor builds and a bot, depending on the engine by tag. CI generates a game from it on every push.
+
+Other choices made during the phase:
+
+- **Scopes.** `App::update` puts a scope around each schedule (and each fixed step); about 40 engine systems have `#[profiling::function]`; the renderer has scopes for batching, tessellation, uploads, encoding, overlays, submit, acquiring the frame (where vsync waits) and present. Without a backend feature the macros expand to nothing. With `profile`, puffin's scopes cost an atomic load until recording starts (`--profile`, the Profiler window, or `cg_core::profile::set_recording`); frames are ended after `Last` only while recording. The `profiling` crate cannot have puffin and Tracy on together (its macros clash), so the two features are one or the other. egui and wgpu mark their own work with the same crate, so their scopes appear too.
+- **The Profiler window** keeps 300 recent frames (`puffin::GlobalFrameView`), draws them as bars (click one to keep it), a flame graph of the chosen frame (hover for the time, click to zoom in) and a table of scopes by their own time (a scope's time less its children's). An ignored test, `capture_profiler` in `cg_ui` (with `--features profile`), renders it offscreen to `target/ui-captures/profiler.png`.
+- **The allocation hunt.** A counting global allocator in `benches/tests/allocations.rs` counts only its own thread's allocations, so parallel tests do not disturb it; `CG_ALLOC_TRACE=<frames>` captures a backtrace per allocation and prints the engine functions that allocated most. What it found and fixed:
+  - the physics: the spatial hash cleared its map every step, freeing every bucket (now buckets are emptied and kept, and dropped only when most of a large map is empty); every query made a candidate buffer (now pooled in `PhysicsWorld`, handed out by a guard that gives it back on drop); `Env` collected the tile grids into a `Vec` per step and per query (now up to four inline); the overlap pairs were a new `BTreeSet` each step (now a sorted `Vec` swapped with a kept one, and `Overlaps` is written only when the pairs change). The level scene went from about 1,170 allocations a frame to none.
+  - the UI: the layout collected roots, children lists, row sizes and the draw stack each frame (now lists kept in a `Local`, children lists lent from a pool down the tree); focus navigation collected the menu each frame; nine-slice images built a `Vec`; the locale cloned the language name every frame to compare it.
+  - the batcher: `sort_by_key` is a stable sort, which allocates a scratch buffer whenever the queue is out of order (bunnymark's four interleaved textures, every frame). Sorting by (key, index) with `sort_unstable_by_key` gave the same order in place, but made release bunnymark 0.5 to 0.9 ms a frame slower (it cannot use the few distinct keys), which the comparison with a Phase 13 build caught. Now it is a stable counting sort: one pass finds each sprite's key among the distinct ones (a scan while there are at most 32, else a sort and binary search), the keys are ranked, and the sprites placed; all its buffers are kept. Release bunnymark at 10,000 sprites, alternating runs: 1.24 and 1.33 ms a frame against Phase 13's 1.42 and 1.39.
+  - Lua: the runtime rebuilt its instance list, index map and lookup sets every step; now it checks change ticks (`Script` added or changed since the last gathering, by its own tick, and every file's and dependency's asset version) and rebuilds only then. Collisions and due timers go through kept lists. What is left is `mlua`'s `Lua::scope` (about 7 small allocations a run, to lend the world safely) and whatever scripts create (query results), which Lua's collector handles.
+- **Cheaper Lua calls.** The world lent to Lua is kept in the app data (`LentWorld`), found by type instead of a registry string lookup. A `self` table holds its entity's bits under a light-userdata key, so methods on `self` need no string lookup or userdata borrow. Entities handed to Lua go through a weak-valued cache table, so a raycast or collision reuses the entity's userdata while Lua holds it (`EntityData` is the userdata; `LuaEntity` converts through the cache). `self:contacts()` refills one table kept on `self` (other entities' contacts still come in a new table); raycast and tile results are sized up front. 500 scripted bodies: 4.28 ms a frame before, 2.70 ms after (release, this machine; physics included).
+- **`require`** resolves `a.b.c` to `a/b/c.lua` (a name with `/` or ending in `.lua` is a path). It runs a file in its own environment, once per asset version, and gives every caller the same value (`true` for nil). While a file's top level runs, the world is lent to `require` only (`CompileWorld`), so the engine's other functions still work only in hooks. A file whose required file is still loading is compiled again in the next run (`Module::waiting`); a module records the files it required, with their versions, and is recompiled (with `on_reload` for its entities) when one changes. Circular requires and missing files are errors with the requiring file's line.
+- **The template game.** A title screen, one level (60x20 tiles, written by a scratch script from Kenney's tiles: two gaps, a step, a plank, spikes, ten coins, the door), an alien with the platformer's Aseprite sheet and animation graph, coyote time and a jump buffer, a camera that follows inside the level, a HUD with touch controls (the platformer's d-pad and jump art), sounds, a Lua script that makes the coins bob (and a `Coin` prefab that gives it to them by class), a win screen, `--demo` with a bot that looks ahead with raycasts, and a test. Its Android Gradle build finds the engine's Java activity with `cargo metadata` (in Cargo's git checkout of the engine) and calls an installed `cg_pack`; its `Trunk.toml` hook calls `cg_pack trunk-bundle`. The README covers running, the web, Android, signing and licenses. Placeholders: the project name, `title` and `app_id`.
+- **Pages** now serves a site the new `docs` job assembles: the platformer's release at the root (from the `web` job's artifact), the guide at `book/`, the API docs at `api/` (rustdoc with warnings denied, the engine crates and the editor, with `script`), with `api/index.html` redirecting to `cashgear_engine`.
+- **Shipped desktop games** read `assets.cgpak` next to the executable when neither `CARGO_MANIFEST_DIR` (a `cargo run`) nor `CG_ASSET_ROOT` is set, so the release zip is the executable, the bundle and licenses. The platformer and the template hide the console window in Windows release builds (`windows_subsystem` under `not(debug_assertions)`).
+- **Release tooling.** `tools/release.py bump X.Y.Z` (the workspace version, `vX.Y.Z` in the template, its README and cargo-generate config, the guide's install command and the README; the changelog's `[Unreleased]` heading), `check vX.Y.Z` (all of those agree and the changelog has the section; CI's `fmt` job runs it on every push) and `notes X.Y.Z` (the changelog section, the release's notes). The changelog now has one section per release; the phase sections stay below the first.
+- **Versions.** profiling 1.0.18, puffin 0.20.0 (with `web` on wasm), criterion 0.8.2 (dev only, `cargo_bench_support` only); tools: cargo-generate 0.26.0 and mdbook 0.5.4 (CI installs both with `taiki-e/install-action`). Actions: `actions/download-artifact@v8`.
+
+### Done
+
+- `cg_core`: `profile` (`set_recording`, `is_recording`, `ENABLED`), the re-exported `profiling` crate, schedule scopes, features `profile` and `profile-tracy`.
+- `cg_ui`: the Profiler window (`profile` feature), `DebugOverlay::profiler`, `UiPlugin::profiler_open` and `--profile`; the layout, focus, nine-slice and locale changes above.
+- `cg_physics`: the pooled buffers, kept buckets, inline grids and the sorted overlap list.
+- `cg_render`: the batcher's stable counting sort; scopes in the painter and the window renderer.
+- `cg_script`: `require`, the change-tick check, the lent world in app data, the entity cache, the reused `contacts` table, kept collision and timer lists.
+- `cg_platform`: the shipped bundle next to the executable; a crate-level example. `cg_editor`: a crate-level example.
+- `cashgear_engine`: features `profile` and `profile-tracy`, `--profile`, `profiling` re-exported, a features table in its docs.
+- `benches/` (`cg_bench`): the scenes, the criterion benchmarks, the allocation test and `report.py`.
+- `templates/game`: the template (game, assets, web page, Android project, editor, CI, README).
+- `docs/book`: the guide (21 chapters).
+- `tools/release.py`; `.github/workflows/release.yml`; CI's `template`, `bench` and `docs` jobs and the release check.
+- The platformer: the bot's `DownTo` before Accept on the pause and level-complete screens (fixes `--demo --level N`), its HUD and log reusing strings, the Android version from `-PversionName`, no console in Windows release builds.
+- 486 tests (13 more than Phase 13); the template's own test, run by CI's `template` job.
+
+### Verified
+
+- All tests pass: 486 (13 more than Phase 13: three for `require`, five allocation checks, the batcher's sort order, four doc examples), with the four screen captures ignored. fmt, clippy (desktop, wasm and Android), rustdoc with warnings denied for the engine crates and the editor, and `mdbook build` are clean.
+- Allocations a frame once warmed up (`cargo test -p cg_bench --test allocations`): 10,000 sprites 0; the level with 200 bodies 0 (about 1,170 before); the menu 0 (19 before); 500 scripted bodies 7 (2,725 before; what is left is `mlua`'s scope); the platformer during play about 36 (the Lua walkers' raycast tables and the HUD clock's text, 57 before).
+- One frame of each scene (`cargo bench -p cg_bench`, release, this machine): 10,000 sprites 1.27 ms; 1,000 sprites 0.16 ms; the level 0.55 ms (0.60 before); the menu 0.05 ms; 500 scripted bodies 2.70 ms (4.28 before); the platformer 0.09 ms.
+- Release bunnymark at 10,000 sprites, uncapped, alternating with a Phase 13 build from a worktree: 1.24 and 1.33 ms a frame against 1.42 and 1.39 ms; with `--ecs`, 1.99 against 2.19 ms. The first version of the allocation-free sort was 0.5 to 0.9 ms slower; this comparison caught it (see the batcher above).
+- The profiler: a test records the engine's scopes through the overlay; an offscreen capture of the Profiler window, looked at, shows the frame bars and a flame graph of the schedules, the engine's systems and egui's own scopes. `hello_window` builds and runs with `profile-tracy` (no Tracy viewer was connected).
+- The template, generated with cargo-generate 0.26 from the local folder and pointed at this checkout: formatting and clippy clean, the bot test passes, the web build checks. Served by trunk in the app's browser pane (`cg_pack trunk-bundle` ran as its hook): the loading screen, the title with its button, a mouse click on Play starting the level, and with `?demo` the bot reaching the door with 8 of 10 coins and the win screen, checked by screenshot. A first version of the level was shorter than the 360-pixel view, which the screenshots showed; it is 20 tiles high now. Its debug APK builds with Gradle (`-PcgAbis=arm64-v8a`, 3 min 47 s): 21.2 MB, the game's library, the engine's activity found through `cargo metadata`, a 35 KB bundle.
+- A shipped Windows build: the release platformer renamed to `CashGear Platformer.exe`, alone in a folder outside the repository with `assets.cgpak`, run without Cargo's environment: it logs `reading assets from the bundle` and the bot plays through the menus into level 1.
+- The platformer's Gradle build with `-PversionName=0.1.0` passes `lintVitalAnalyzeRelease`. `tools/release.py check v0.1.0` passes.
+- Not checked by me:
+  - The CI jobs added this phase and the release workflow, before this push: see the results recorded after it.
+  - The template from the git tag (it needs the tag to exist; CI tests it with the checkout's path).
+  - Any phone: neither the platformer nor the template has run on a device yet.
+  - The guide read through by someone new to the engine.
+
+### Manual checks for the user
+
+- The guide: once CI has deployed, open <https://mohamedsadat.github.io/cashgear-engine/book/> and <https://mohamedsadat.github.io/cashgear-engine/api/>, and check the game still opens at the root.
+- The template, from scratch on your machine (after the release tag is pushed): `cargo install cargo-generate --locked`, `cargo install --git https://github.com/MohamedSadat/cashgear-engine --tag v0.1.0 cg_pack`, then `cargo generate --git https://github.com/MohamedSadat/cashgear-engine templates/game --tag v0.1.0 --name my-game`, `cd my-game`, `cargo run`. Play the level with the keyboard and a gamepad; `trunk serve` and play it in a browser; `cd android && gradlew.bat assembleDebug` and install it on your phone.
+- The profiler: `cargo run -p platformer --features cashgear_engine/profile -- --profile`. The Profiler window shows the frames; click a bar to keep a frame, hover the flame graph, click a scope to zoom, and look at the Scopes tab.
+- The release: the GitHub Release for `v0.1.0` has the Windows zip, the web zip, the Android APK and the AAB. Unzip the Windows build somewhere outside the repository and run `CashGear Platformer.exe` (SmartScreen will warn: the build is unsigned). Install the APK on your phone. Without the `CG_ANDROID_*` secrets the APK is the debug-signed one and the AAB is unsigned; add the secrets (see Phase 11) for Play-ready builds.
+- The Phase 11 device checks are still open: the platformer and the template on a real phone.
+
 ## Known issues
 
 - On the web, `AppExit` stops the loop but leaves the page; there is nowhere to exit to.
@@ -910,14 +986,14 @@ Other choices made during the phase:
 - A child whose parent has no `Transform2D` keeps a stale `GlobalTransform2D`. Give every parent in a hierarchy a transform.
 - `MainCamera` uses the camera's un-interpolated transform, so pointer picking can be off by up to one fixed step of camera motion.
 - `Assets<Image>` keeps every image in CPU memory as well as on the GPU, so a lost device can re-upload.
-- On desktop, files are read and decoded on the main thread inside the asset update, so a large asset makes that frame long. A worker thread for desktop loads can come with the Phase 14 performance pass.
-- An example's executable run directly (not through `cargo run`) finds its assets only if they are next to it or `CG_ASSET_ROOT` points at them.
+- On desktop, files are read and decoded on the main thread inside the asset update, so a large asset makes that frame long. A worker thread for desktop loads is in the backlog (not taken in Phase 14).
+- An example's executable run directly (not through `cargo run`) finds its assets only if they (or `assets.cgpak`) are next to it or `CG_ASSET_ROOT` points at them.
 - Hot-reloading a map respawns its objects, so they lose their state; hot-reloading a prefab changes only entities spawned afterwards.
 - `cg_tiled` supports orthogonal maps with single-image tilesets. Image-collection tilesets draw nothing (with a warning); isometric and hexagonal maps, and text objects (spawned as plain rectangles) are not supported yet.
 - Tilemaps are drawn at their entity's `GlobalTransform2D` without interpolation, so a map moved in fixed steps would step on fast displays. Maps normally stay put.
 - Tile chunks are cached as queued sprites on the CPU and copied into the sprite queue each frame, not kept as GPU buffers. At the example's size that is about 320 tiles a frame; revisit if a level gets much larger.
 - Browsers hide the adapter name behind WebGPU, so `RenderStats::adapter()` reads "an unnamed GPU" there.
-- With 20,000 bunnies in a debug wasm build, WebGL2 drops to 30 fps. Bunnymark's page now builds releases with the web profile, but that has not been measured yet (Phase 14).
+- With 20,000 bunnies in a debug wasm build, WebGL2 drops to 30 fps. Bunnymark's page builds releases with the web profile, but that has still not been measured (the app's browser pane throttles hidden pages; a visible browser or headless Chrome is needed).
 - Kinematic bodies are axis-aligned boxes and collide with every collider as its bounding box; rotated rectangles stay axis-aligned.
 - Slopes carry a body by its foot, so its corners hang over or into the hill; slopes block only from above, so their high side should meet a solid tile or another slope. Ceiling slopes (tiles flipped vertically) collide as solid blocks. A body wider than twice a slope's run climbs it by its corner.
 - Hazard tiles hurt over their whole cell, so a body jumping just over Kenney's low spikes can be hit by the empty top of the cell.
@@ -989,6 +1065,9 @@ Other choices made during the phase:
 - Each call from Lua into the engine costs about a microsecond (it looks up and borrows the world), and calls that return tables (`contacts`, `raycast`) 5 to 8 µs. Dozens of scripted entities cost nothing measurable; thousands would want cheaper calls (Phase 14).
 - There is no `require`: each file stands alone, and shared code goes into the game's functions or is repeated.
 - `pairs` visits a table's keys in an order that changes from run to run (Lua seeds its string hashes at start). Scripts that must repeat exactly use `ipairs` or sorted keys.
+- `self:contacts()` refills one table kept on `self` each call; a script that keeps the table sees it change. Copy the fields to keep them.
+- The runtime lends the world to Lua through `mlua`'s scope each run, about 7 small allocations; tables that queries return (raycasts, tiles, other entities' contacts) are Lua's garbage. Steady frames with scripts are therefore not allocation-free, unlike the engine's own.
+- `require` works at a file's top level while a required file is still loading (the file is compiled again once it is in), but inside a hook it fails for a file not loaded yet. Require at the top of scripts.
 - Lua numbers are doubles and engine values `f32`. Simple arithmetic gives the same bits as Rust's (the platformer's walker is tested to match), but long chains of operations in Lua can differ in the last bit from the same code in Rust.
 - The instruction budget counts Lua instructions only, in steps of 1,000; time spent in the engine's functions is not counted.
 - A failing hook stops its entity's script until the file changes (another entity's failure does not). Map objects respawn on a map reload, so scripted objects start over then, with new `self`s.
@@ -1009,6 +1088,13 @@ Other choices made during the phase:
 - The editor has no clipboard (egui gets no copy or paste events from the engine), no native file dialogs (documents open from the asset browser or the command line), and no preferences saved between runs.
 - The standalone editor's prefab names come from file names in PascalCase; a game that names its prefabs otherwise (`ecs_sprites` uses lowercase names) needs its own editor build, as the platformer has.
 - egui's bundled fonts lack many symbols (arrows, crosses), so the editor's buttons use words.
+
+- The `profile` (puffin) and `profile-tracy` features cannot both be on: the `profiling` crate's macros clash. Tracy needs a desktop target and compiles Tracy's C++ client.
+- Engine systems have scopes by hand (`#[profiling::function]` on about 40 systems and scopes in the renderer); systems without one show only inside their schedule's scope. Recording costs a little per scope while on; the Profiler window keeps 300 frames.
+- The allocation test counts the test thread's allocations; wgpu's (the GPU path) are not counted, since the scenes have no window. The painter reuses its own buffers, but wgpu allocates per frame inside.
+- The game template depends on the engine by git tag, so a generated game resolves its other dependencies afresh (no lock file comes with it) and may pick newer compatible versions than the engine's own `Cargo.lock`. Its web release and Android build call `cg_pack`, which must be installed (`cargo install --git ... cg_pack`).
+- The Windows release build is unsigned, so SmartScreen warns on first run. Without the `CG_ANDROID_*` secrets the release workflow publishes the debug-signed APK and an unsigned AAB.
+- The guide's chapters are written by hand from the code at 0.1.0; only the template excerpts are compiled. `cargo doc` (the API docs) is the reference.
 
 ## Notes for later phases
 
@@ -1062,6 +1148,8 @@ Other choices made during the phase:
 
 - **Phase 14:** puffin scopes for the editor's frame (the panels, and the map rewrite on each drag) if a larger level makes it slow. The mdBook guide needs an editor chapter: the keys, saving in place, play-in-editor, and building the editor into a game with `EditorPlugin` and `EditMode`. The `cargo generate` template can include an `editor` crate like `games/platformer/editor`. The editor's `--demo` and `capture_editor` are its regression checks.
 
+- **Phase 15:** the open device checks (Phase 11's, on a phone) for the platformer and a game made from the template; Firefox, Safari and an iPhone; the WebGL2 frame time of bunnymark's release page. `cg_bench` and `CG_ALLOC_TRACE` find regressions and allocations; compare release bunnymark against the `v0.1.0` tag in a worktree as before. Releases: `tools/release.py bump 0.2.0`, write the changelog section, tag `v0.2.0`.
+
 ## Backlog
 
 Features that came up but don't serve the platformer or a listed example go here.
@@ -1092,4 +1180,6 @@ Features that came up but don't serve the platformer or a listed example go here
 - Web: uploading to itch.io from CI with butler (needs an API key secret), a service worker for offline play, content-hashed bundle names, the page following the game's language, and cpal's AudioWorklet output (needs cross-origin isolation headers, which GitHub Pages cannot set).
 - Scripting: `require` of other script files, Lua bindings for UI and the locale, a per-frame hook, coroutines that wait across steps (`wait(seconds)`), Luau as an alternative runtime, and scripts on the web through a Lua compiled for `wasm32-unknown-unknown` if one appears.
 - Android: gamepads, a soft keyboard for text fields, GameActivity, Android TV and ChromeOS, keeping clear of rounded screen corners, and Play Asset Delivery if the bundle grows.
+- Releases: Linux and macOS builds of the sample game, Windows code signing, publishing to crates.io (the names were free at 0.1.0), uploading to itch.io with butler, Play Store extras (debug symbols for crash reports, an icon foreground layer).
+- Profiling: scopes for every system without marking them by hand, saving and loading puffin captures, a frame-time graph per scope.
 - Editor: an animation preview (a sheet's clips, an animator's states), a particle preset editor, painting tiles, adding and renaming object layers, reshaping polygons, a clipboard, several open documents in tabs, recent files and saved preferences, native file dialogs, and editing a live entity during Play.

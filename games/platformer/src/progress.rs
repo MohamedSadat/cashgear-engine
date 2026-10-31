@@ -165,13 +165,23 @@ fn tick_clock(time: Res<Time>, mut session: ResMut<Session>) {
 
 /// `mm:ss.t` for the HUD and the menus.
 pub(crate) fn format_time(seconds: f32) -> String {
+    let mut text = String::new();
+    write_time(&mut text, seconds);
+    text
+}
+
+/// [`format_time`] into a string that keeps its memory (the HUD's, every frame).
+pub(crate) fn write_time(out: &mut String, seconds: f32) {
+    use core::fmt::Write;
     let tenths = (seconds.max(0.0) * 10.0) as u32;
-    format!(
+    out.clear();
+    let _ = write!(
+        out,
         "{:02}:{:02}.{}",
         tenths / 600,
         tenths / 10 % 60,
         tenths % 10
-    )
+    );
 }
 
 #[cfg(test)]

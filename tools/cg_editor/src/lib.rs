@@ -22,6 +22,26 @@
 //! `cg_editor` binary runs alone for any asset folder; there Play runs the engine's own
 //! systems on the scene: physics, animation and Lua scripts.
 //!
+//! A game's editor build, as the game template's `editor` crate has it:
+//!
+//! ```no_run
+//! use cashgear_engine::prelude::*;
+//! use cg_editor::{EditorPlugin, PlayMode};
+//!
+//! # struct Game;
+//! # impl Plugin for Game { fn build(&self, _: &mut App) {} }
+//! fn main() -> AppExit {
+//!     let editor = EditorPlugin::new(PlayMode::Game)
+//!         .with_args(&Args::from_env())
+//!         .open("maps/level1.tmx");
+//!     App::new()
+//!         .add_plugins(DefaultPlugins::default())
+//!         .add_plugins(editor)
+//!         .add_plugins(Game)
+//!         .run()
+//! }
+//! ```
+//!
 //! | Key | Does |
 //! | --- | --- |
 //! | W, E, R | Move, rotate, resize tool |

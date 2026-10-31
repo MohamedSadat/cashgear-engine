@@ -30,6 +30,7 @@ cg_ui = { workspace = true, default-features = false, optional = true }
 cg_world.workspace = true
 log.workspace = true
 mlua = { workspace = true, optional = true }
+profiling.workspace = true
 serde.workspace = true
 
 [lints]

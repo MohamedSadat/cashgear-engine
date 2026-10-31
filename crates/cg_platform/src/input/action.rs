@@ -491,6 +491,7 @@ impl ActionState {
     }
 }
 
+#[profiling::function]
 pub(crate) fn update_action_state(
     map: Res<ActionMap>,
     keys: Res<ButtonInput<KeyCode>>,

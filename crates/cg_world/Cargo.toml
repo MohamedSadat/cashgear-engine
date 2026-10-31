@@ -16,6 +16,7 @@ cg_core.workspace = true
 erased-serde.workspace = true
 glam = { workspace = true, features = ["serde"] }
 log.workspace = true
+profiling.workspace = true
 ron.workspace = true
 serde.workspace = true
 

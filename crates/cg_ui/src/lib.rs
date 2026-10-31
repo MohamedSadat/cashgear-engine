@@ -32,7 +32,8 @@
 //!
 //! With the `debug-overlay` feature (on by default), F12 opens an egui overlay with frame
 //! times, render stats, the entity list and a component inspector, and debug drawing
-//! toggles.
+//! toggles. With the `profile` feature as well, its Profiler window shows what the engine's
+//! profiling scopes recorded: recent frames, a flame graph and the slowest scopes.
 //!
 //! ```no_run
 //! use cg_core::prelude::*;
@@ -72,6 +73,8 @@ mod locale;
 mod node;
 #[cfg(feature = "debug-overlay")]
 mod overlay;
+#[cfg(all(feature = "debug-overlay", feature = "profile"))]
+mod profiler;
 mod text;
 mod touch;
 mod widgets;
@@ -138,6 +141,9 @@ pub struct UiPlugin {
     pub overlay_key: Option<KeyCode>,
     /// Start with the debug overlay open. `--overlay` turns it on.
     pub overlay_open: bool,
+    /// Start with the overlay's Profiler window open (with the `profile` feature).
+    /// `--profile` turns it on, and the overlay with it.
+    pub profiler_open: bool,
 }
 
 impl Default for UiPlugin {
@@ -148,12 +154,13 @@ impl Default for UiPlugin {
             default_bindings: true,
             overlay_key: Some(KeyCode::F12),
             overlay_open: false,
+            profiler_open: false,
         }
     }
 }
 
 impl UiPlugin {
-    /// Applies the `--touch`, `--no-touch` and `--overlay` launch flags.
+    /// Applies the `--touch`, `--no-touch`, `--overlay` and `--profile` launch flags.
     pub fn with_args(mut self, args: &Args) -> Self {
         if args.flag("touch") {
             self.touch = TouchMode::Always;
@@ -163,6 +170,10 @@ impl UiPlugin {
         }
         if args.flag("overlay") {
             self.overlay_open = true;
+        }
+        if args.flag("profile") {
+            self.overlay_open = true;
+            self.profiler_open = true;
         }
         self
     }
@@ -289,7 +300,7 @@ impl Plugin for UiPlugin {
         .add_systems(Render, draw::draw_ui.in_set(UiSystems::Draw));
 
         #[cfg(feature = "debug-overlay")]
-        overlay::build(app, self.overlay_key, self.overlay_open);
+        overlay::build(app, self.overlay_key, self.overlay_open, self.profiler_open);
     }
 }
 

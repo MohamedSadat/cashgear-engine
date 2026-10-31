@@ -76,6 +76,7 @@ type VisibilityNode = (
 /// Computes [`InheritedVisibility`] from [`Visibility`] down the hierarchy. Entities with
 /// no `Visibility` pass their parent's on unchanged. Roots are visited in storage order;
 /// only children are looked up one by one.
+#[profiling::function]
 pub(crate) fn propagate_visibility(
     mut roots: Query<VisibilityNode, RootFilter>,
     mut nodes: Query<VisibilityNode, With<ChildOf>>,

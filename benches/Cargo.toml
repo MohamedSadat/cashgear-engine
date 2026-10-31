@@ -1,0 +1,24 @@
+[package]
+name = "cg_bench"
+description = "CashGear Engine benchmarks: scenes run without a window, timed with criterion and checked for heap allocations per frame."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cashgear_engine = { workspace = true, default-features = false, features = ["script"] }
+# The sample game, played by its bot, as the most complete scene.
+platformer = { path = "../games/platformer" }
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "frames"
+harness = false
+
+[lints]
+workspace = true

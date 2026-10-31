@@ -147,10 +147,12 @@ fn drive_menus(
             (Screen::Title, _) => vec![Wait(30), Tap(actions::UP), Tap(actions::ACCEPT)],
             // Pause once, early in the first level.
             (Screen::Playing, 1) => vec![Wait(200), Tap("pause")],
-            (Screen::Paused, _) => vec![Wait(30), Tap(actions::ACCEPT)],
+            // `DownTo` first: started with `--level`, the bot never used the menus, so
+            // nothing has the focus yet.
+            (Screen::Paused, _) => vec![Wait(30), DownTo(MenuAction::Resume), Tap(actions::ACCEPT)],
             (Screen::Complete, _) => {
                 bot.levels_done += 1;
-                vec![Wait(60), Tap(actions::ACCEPT)]
+                vec![Wait(60), DownTo(MenuAction::Next), Tap(actions::ACCEPT)]
             }
             // The bot's run is the same every time, so trying again would lose again.
             (Screen::GameOver, _) => {

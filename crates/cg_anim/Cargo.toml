@@ -19,6 +19,7 @@ cg_platform.workspace = true
 cg_render.workspace = true
 cg_world.workspace = true
 log.workspace = true
+profiling.workspace = true
 ron.workspace = true
 serde.workspace = true
 # Aseprite sheets are JSON.

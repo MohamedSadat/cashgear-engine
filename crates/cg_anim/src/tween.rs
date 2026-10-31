@@ -422,6 +422,7 @@ type Targets<'a> = (
 );
 
 /// Advances the tweens that run in fixed steps: transform tweens on interpolated entities.
+#[profiling::function]
 pub(crate) fn advance_fixed_tweens(
     time: Res<Time>,
     mut targets: Query<Targets>,
@@ -431,6 +432,7 @@ pub(crate) fn advance_fixed_tweens(
 }
 
 /// Advances the tweens that run every frame: everything else.
+#[profiling::function]
 pub(crate) fn advance_frame_tweens(
     time: Res<Time>,
     mut targets: Query<Targets>,

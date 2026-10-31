@@ -1,0 +1,180 @@
+name: Release
+
+# Pushing a tag `vX.Y.Z` builds the sample platformer for Windows, the web and Android and
+# publishes them in a GitHub Release, with the tag's CHANGELOG.md section as its notes.
+# Running the workflow by hand builds everything without publishing (a dry run).
+# tools/release.py describes the steps before the tag.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: version and notes
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: version
+        name: the version
+        # The tag on a tag push; the workspace's version on a dry run.
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: the tag, the version, the template and the changelog agree
+        run: python3 tools/release.py check "v${{ steps.version.outputs.version }}"
+      - name: release notes
+        run: python3 tools/release.py notes "${{ steps.version.outputs.version }}" > notes.md
+      - uses: actions/upload-artifact@v7
+        with:
+          name: notes
+          path: notes.md
+
+  windows:
+    name: Windows build
+    needs: check
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - name: build the game and its asset bundle
+        run: |
+          cargo build --release -p platformer
+          cargo run --release -p cg_pack -- bundle games/platformer/assets target/release/assets.cgpak
+      - name: zip
+        # The game finds assets.cgpak next to its executable.
+        shell: bash
+        run: |
+          dir="CashGear-Platformer-$VERSION-windows"
+          mkdir "$dir"
+          cp target/release/platformer.exe "$dir/CashGear Platformer.exe"
+          cp target/release/assets.cgpak LICENSE-MIT LICENSE-APACHE "$dir/"
+          cp games/platformer/assets/KENNEY-LICENSE.txt "$dir/"
+          printf 'CashGear Platformer %s\r\n\r\nRun "CashGear Platformer.exe". Arrows or A/D to run, Space to jump, Esc to pause;\r\na gamepad works too. F11 or Alt+Enter: fullscreen.\r\n\r\nMade with CashGear Engine: https://github.com/MohamedSadat/cashgear-engine\r\nArt: Kenney (CC0), see KENNEY-LICENSE.txt.\r\n' "$VERSION" > "$dir/README.txt"
+          7z a "$dir.zip" "$dir"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: CashGear-Platformer-*-windows.zip
+
+  web:
+    name: web build
+    needs: check
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux packages
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@0.22.1
+      - name: build the platformer for the web
+        working-directory: games/platformer
+        run: trunk build --release --no-default-features --public-url ./
+      - name: zip for itch.io and any static host
+        working-directory: games/platformer/dist
+        run: |
+          rm -f .trunk-lock
+          zip -r "$GITHUB_WORKSPACE/CashGear-Platformer-$VERSION-web.zip" .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web
+          path: CashGear-Platformer-*-web.zip
+
+  android:
+    name: Android build
+    needs: check
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      HAS_KEYSTORE: ${{ secrets.CG_ANDROID_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux packages
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk@4.1.2
+      - name: Android SDK packages
+        run: >-
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" > /dev/null
+      - name: release keystore
+        if: env.HAS_KEYSTORE == 'true'
+        env:
+          KEYSTORE: ${{ secrets.CG_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "CG_ANDROID_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+      - name: build the APK and the AAB
+        # Signed with the upload key when the repository has the secrets. Without them the
+        # release APK could not be installed, so the debug APK (signed with the SDK's debug
+        # key) is published instead, and the AAB is unsigned.
+        working-directory: games/platformer/android
+        env:
+          CG_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.CG_ANDROID_KEYSTORE_PASSWORD }}
+          CG_ANDROID_KEY_ALIAS: ${{ secrets.CG_ANDROID_KEY_ALIAS }}
+          CG_ANDROID_KEY_PASSWORD: ${{ secrets.CG_ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ "$HAS_KEYSTORE" = true ]; then
+            ./gradlew --no-daemon assembleRelease bundleRelease -PversionName="$VERSION"
+            cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/CashGear-Platformer-$VERSION.apk"
+            cp app/build/outputs/bundle/release/app-release.aab "$GITHUB_WORKSPACE/CashGear-Platformer-$VERSION.aab"
+          else
+            ./gradlew --no-daemon assembleDebug bundleRelease -PversionName="$VERSION"
+            cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/CashGear-Platformer-$VERSION-debug.apk"
+            cp app/build/outputs/bundle/release/app-release.aab "$GITHUB_WORKSPACE/CashGear-Platformer-$VERSION-unsigned.aab"
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android
+          path: |
+            CashGear-Platformer-*.apk
+            CashGear-Platformer-*.aab
+
+  publish:
+    name: GitHub Release
+    needs: [check, windows, web, android]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: release
+          merge-multiple: true
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -l release
+          gh release create "$TAG" release/CashGear-Platformer-* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "CashGear Engine $TAG" \
+            --notes-file release/notes.md \
+            --verify-tag

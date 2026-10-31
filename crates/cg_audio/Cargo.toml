@@ -17,6 +17,7 @@ cg_render.workspace = true
 cg_world.workspace = true
 kira.workspace = true
 log.workspace = true
+profiling.workspace = true
 ron.workspace = true
 rtrb.workspace = true
 serde.workspace = true

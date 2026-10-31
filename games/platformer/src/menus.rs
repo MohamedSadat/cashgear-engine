@@ -1108,15 +1108,18 @@ fn report(
     stats: Res<RenderStats>,
     mut last: Local<Option<(Screen, String)>>,
 ) {
-    let now = (*state.current(), locale.language().to_owned());
-    if last.as_ref() != Some(&now) {
+    let screen = *state.current();
+    if last
+        .as_ref()
+        .is_none_or(|(s, language)| *s != screen || language != locale.language())
+    {
         info!(
             "screen {:?}, language {}, {:.0} fps, {} draw calls",
-            now.0,
-            now.1,
+            screen,
+            locale.language(),
             stats.fps(),
             stats.draw_calls()
         );
-        *last = Some(now);
+        *last = Some((screen, locale.language().to_owned()));
     }
 }

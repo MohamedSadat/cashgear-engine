@@ -418,6 +418,7 @@ const MAX_TRANSITIONS: usize = 8;
 
 /// Runs every [`Animator`] for one fixed step: forced states, transitions, then the
 /// state's clip and speed on the entity's [`SpriteAnimation`].
+#[profiling::function]
 pub(crate) fn run_animators(
     time: Res<Time>,
     graphs: Res<Assets<AnimationGraph>>,

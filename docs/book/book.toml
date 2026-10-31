@@ -1,0 +1,17 @@
+[book]
+title = "CashGear Engine"
+description = "A guide to CashGear Engine, a Rust 2D game engine for desktop, web and Android."
+authors = ["The CashGear Engine contributors"]
+language = "en"
+
+[build]
+# `mdbook build docs/book` writes the site to docs/book/book (ignored by git); CI publishes
+# it at https://mohamedsadat.github.io/cashgear-engine/book/.
+build-dir = "book"
+
+[output.html]
+git-repository-url = "https://github.com/MohamedSadat/cashgear-engine"
+edit-url-template = "https://github.com/MohamedSadat/cashgear-engine/edit/main/docs/book/{path}"
+site-url = "/cashgear-engine/book/"
+default-theme = "navy"
+preferred-dark-theme = "navy"

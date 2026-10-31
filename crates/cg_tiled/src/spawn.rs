@@ -167,6 +167,7 @@ pub struct TiledObject {
 }
 
 /// Builds tilemaps whose map has loaded or changed since they were last built.
+#[profiling::function]
 pub(crate) fn build_tilemaps(
     mut commands: Commands,
     mut tilemaps: Query<(Entity, &Tilemap, &mut TilemapState)>,

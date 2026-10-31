@@ -38,6 +38,8 @@ pub struct DebugOverlay {
     pub windows: bool,
     /// Outline every UI node's rectangle.
     pub ui_outlines: bool,
+    /// Show the Profiler window (with the `profile` feature). `--profile` opens it.
+    pub profiler: bool,
     /// The entity shown in the inspector.
     pub selected: Option<Entity>,
     filter: String,
@@ -224,13 +226,14 @@ impl RenderOverlay for EguiPainter {
 use cg_render::wgpu;
 
 /// Sets the overlay up. Called by `UiPlugin`.
-pub(crate) fn build(app: &mut App, key: Option<KeyCode>, open: bool) {
+pub(crate) fn build(app: &mut App, key: Option<KeyCode>, open: bool, profiler: bool) {
     let shared = SharedFrame::default();
     app.insert_resource(DebugOverlay {
         open,
         key,
         windows: true,
         ui_outlines: false,
+        profiler,
         selected: None,
         filter: String::new(),
         frame_times: VecDeque::with_capacity(SAMPLES),
@@ -253,6 +256,11 @@ pub(crate) fn build(app: &mut App, key: Option<KeyCode>, open: bool) {
             renderer: None,
         });
     style(&app.world().resource::<EguiContext>().ctx);
+    #[cfg(feature = "profile")]
+    app.init_resource::<crate::profiler::ProfilerView>();
+    if profiler {
+        cg_core::profile::set_recording(true);
+    }
 
     use cg_physics::{
         Collider, CollisionLayers, KinematicBody, KinematicContacts, Sensor, TileCollider,
@@ -301,6 +309,7 @@ fn style(ctx: &egui::Context) {
 /// Toggles the overlay, records the frame time and starts the egui frame from this
 /// frame's input.
 #[allow(clippy::too_many_arguments)]
+#[profiling::function]
 fn begin_overlay(
     mut overlay: ResMut<DebugOverlay>,
     mut egui_context: ResMut<EguiContext>,
@@ -470,6 +479,7 @@ fn raw_input(
 
 /// Builds the overlay's windows and hands the result to the painter. An exclusive system
 /// in `Render`, so the inspector can read and edit any component.
+#[profiling::function]
 fn draw_overlay(world: &mut World) {
     let Some(ctx) = world
         .get_resource::<EguiContext>()
@@ -521,6 +531,7 @@ fn windows(ctx: &egui::Context, world: &mut World, overlay: &mut DebugOverlay) {
                     }
                     ui.checkbox(&mut overlay.ui_outlines, "UI outlines");
                 });
+            profiler_toggle(ui, overlay);
             egui::CollapsingHeader::new("Entities")
                 .default_open(false)
                 .show(ui, |ui| entity_list(ui, world, overlay));
@@ -536,8 +547,28 @@ fn windows(ctx: &egui::Context, world: &mut World, overlay: &mut DebugOverlay) {
             overlay.selected = None;
         }
     }
+    #[cfg(feature = "profile")]
+    if overlay.profiler
+        && let Some(mut view) = world.get_resource_mut::<crate::profiler::ProfilerView>()
+    {
+        crate::profiler::window(ctx, &mut view, &mut overlay.profiler);
+    }
     if overlay.ui_outlines {
         ui_outlines(ctx, world, &window);
+    }
+}
+
+/// The checkbox that opens the Profiler window, which needs the `profile` feature.
+fn profiler_toggle(ui: &mut egui::Ui, overlay: &mut DebugOverlay) {
+    let available = cfg!(feature = "profile");
+    let was = overlay.profiler;
+    ui.add_enabled_ui(available, |ui| {
+        ui.checkbox(&mut overlay.profiler, "Profiler")
+            .on_disabled_hover_text("Build with the `profile` feature to record frames.");
+    });
+    // Opening the window starts recording, which costs a little per scope.
+    if overlay.profiler && !was {
+        cg_core::profile::set_recording(true);
     }
 }
 

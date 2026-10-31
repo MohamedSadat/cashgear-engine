@@ -69,6 +69,7 @@ impl App {
             world.add_schedule(Schedule::new(label));
         }
         world.init_resource::<Time>();
+        crate::profile::start();
 
         let mut app = Self {
             world,
@@ -187,23 +188,34 @@ impl App {
         let world = &mut self.world;
         if !self.started {
             self.started = true;
+            profiling::scope!("Startup");
             world.run_schedule(Startup);
         }
         world.resource_mut::<Time>().begin_frame(delta);
-        world.run_schedule(First);
-        world.run_schedule(PreUpdate);
-        world.run_schedule(StateTransition);
+        // One scope per schedule, so the profiler shows where a frame went even in systems
+        // without scopes of their own.
+        macro_rules! run {
+            ($label:ident, $name:literal) => {{
+                profiling::scope!($name);
+                world.run_schedule($label);
+            }};
+        }
+        run!(First, "First");
+        run!(PreUpdate, "PreUpdate");
+        run!(StateTransition, "StateTransition");
         while world.resource_mut::<Time>().expend_fixed_step() {
-            world.run_schedule(FixedPreUpdate);
-            world.run_schedule(FixedUpdate);
-            world.run_schedule(FixedPostUpdate);
+            profiling::scope!("fixed step");
+            run!(FixedPreUpdate, "FixedPreUpdate");
+            run!(FixedUpdate, "FixedUpdate");
+            run!(FixedPostUpdate, "FixedPostUpdate");
         }
         world.resource_mut::<Time>().end_fixed_steps();
-        world.run_schedule(Update);
-        world.run_schedule(PostUpdate);
-        world.run_schedule(Render);
-        world.run_schedule(Last);
+        run!(Update, "Update");
+        run!(PostUpdate, "PostUpdate");
+        run!(Render, "Render");
+        run!(Last, "Last");
         world.clear_trackers();
+        crate::profile::finish_frame();
     }
 
     /// Returns an exit request written since the last call, if any. Errors win over

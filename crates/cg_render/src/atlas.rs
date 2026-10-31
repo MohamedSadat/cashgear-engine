@@ -212,6 +212,7 @@ impl PrefabComponent for AtlasSprite {
 
 /// Points each [`AtlasSprite`]'s sprite at its region when the atlas loads or changes, or
 /// the component changes.
+#[profiling::function]
 pub(crate) fn apply_atlas_sprites(
     mut sprites: Query<(Entity, &mut AtlasSprite, &mut Sprite)>,
     atlases: Res<Assets<TextureAtlas>>,

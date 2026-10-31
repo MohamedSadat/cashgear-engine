@@ -73,8 +73,10 @@ impl std::error::Error for IoError {}
 ///
 /// Files are read from a [`Bundle`] first when there is one: one given with
 /// [`with_bundle`](Self::with_bundle), on the web the one the page downloaded (a promise
-/// of an `ArrayBuffer` in `window.cashgearBundle`, looked for on the first read), and on
-/// Android [`BUNDLE_FILE`] in the APK's assets (read once per process).
+/// of an `ArrayBuffer` in `window.cashgearBundle`, looked for on the first read), on
+/// Android [`BUNDLE_FILE`] in the APK's assets (read once per process), and on desktop
+/// [`BUNDLE_FILE`] next to the executable when the game is not run by `cargo run` and
+/// `CG_ASSET_ROOT` is not set (a shipped game: the executable and its bundle).
 ///
 /// ```no_run
 /// # async fn demo() -> Result<(), cg_platform::io::IoError> {
@@ -213,7 +215,8 @@ impl BundleSlot {
 }
 
 /// The bundle a new [`AssetIo`] starts with: the web looks for the page's on the first
-/// read, Android uses the APK's, desktop has none unless asked.
+/// read, Android uses the APK's, and a shipped desktop game the [`BUNDLE_FILE`] next to its
+/// executable.
 fn platform_bundle() -> BundleState {
     if cfg!(target_arch = "wasm32") {
         return BundleState::Unchecked;
@@ -222,7 +225,25 @@ fn platform_bundle() -> BundleState {
     if let Some(bundle) = crate::android::apk_bundle() {
         return BundleState::Ready(bundle);
     }
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+    if let Some(path) = shipped_bundle() {
+        return open_bundle(&path.to_string_lossy());
+    }
     BundleState::Missing
+}
+
+/// [`BUNDLE_FILE`] next to the executable, for a game shipped as the executable and its
+/// bundle (a release zip). Not when run by `cargo run` or with `CG_ASSET_ROOT` set: then
+/// the asset folder is meant.
+#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+fn shipped_bundle() -> Option<std::path::PathBuf> {
+    if std::env::var_os("CG_ASSET_ROOT").is_some()
+        || std::env::var_os("CARGO_MANIFEST_DIR").is_some()
+    {
+        return None;
+    }
+    let path = std::env::current_exe().ok()?.parent()?.join(BUNDLE_FILE);
+    path.is_file().then_some(path)
 }
 
 /// Logs what a bundle holds, or why it is not used, and keeps it if it is good.
