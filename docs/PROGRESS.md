@@ -21,7 +21,11 @@ This file tracks phase status, the decisions made at the start of each phase, kn
 | 12 | Lua scripting | Done | `phase-12` |
 | 13 | Scene editor | Done | `phase-13` |
 | 14 | Polish, performance and release | Done | `phase-14`, `v0.1.0` |
-| 15 | Field testing and 0.2 | Next | |
+| 15 | The player: games without Rust | Next | |
+| 16 | The editor as the hub | Planned | |
+| 17 | Scripts on the web, web export | Planned | |
+| 18 | Android export | Planned | |
+| 19 | Built-in content editors | Planned | |
 
 ## Phase 0 — Repository and workspace
 
@@ -1157,7 +1161,25 @@ Other choices made during the phase:
 
 - **Phase 14:** puffin scopes for the editor's frame (the panels, and the map rewrite on each drag) if a larger level makes it slow. The mdBook guide needs an editor chapter: the keys, saving in place, play-in-editor, and building the editor into a game with `EditorPlugin` and `EditMode`. The `cargo generate` template can include an `editor` crate like `games/platformer/editor`. The editor's `--demo` and `capture_editor` are its regression checks.
 
-- **Phase 15:** the open device checks (Phase 11's, on a phone) for the platformer and a game made from the template; Firefox, Safari and an iPhone; the WebGL2 frame time of bunnymark's release page. `cg_bench` and `CG_ALLOC_TRACE` find regressions and allocations; compare release bunnymark against the `v0.1.0` tag in a worktree as before. Releases: `tools/release.py bump 0.2.0`, write the changelog section, tag `v0.2.0`.
+- **Phases 15–19 (the GUI engine, see PLAN.md):**
+  - **Field testing moved.** The open device checks (Phase 11's, on a phone) are now in Phase 18, and Firefox, Safari, an iPhone and WebGL2 frame times are in Phase 17.
+  - **Regression checks stay.** `cg_bench` and `CG_ALLOC_TRACE` still find regressions and allocations; compare release bunnymark against the `v0.1.0` tag in a worktree as before.
+  - **Releases:** `tools/release.py bump 0.2.0`, write the changelog section, tag `v0.2.0` (planned for Phase 16's end).
+- **Phase 15:**
+  - **UI in prefabs.** Every UI widget is already a prefab component (`Node`, `Text`, `Button`, `Slider`, `StateColors`, `Focusable`, `Localized`...), so screens can be prefabs as they are.
+  - **Events to the main script.** `events.emit` reaches Rust as a `ScriptMessage`; the player forwards it to `main.lua`'s `on_event`.
+  - **What the scripting example leans on.** Its scripts rely on the example's `game` table (`game.demo`) and `add_script_states`. Its player and goal scripts already check for `game` so the standalone editor can play them.
+  - **Controls stand-in.** `cg_editor::play_controls` stands in for a project's controls until `project.ron` has them.
+  - **The template's game.** `templates/game` stays the Rust path; `templates/project` is the Lua one.
+- **Phase 16:**
+  - **Bundling code.** It is in `tools/cg_pack/src/bundle.rs` (`read_folder`, `write`), in a binary-only crate today.
+  - **The editor's Windows zip.** The release workflow's Windows job already builds and zips the standalone editor (`CashGear-Editor-<version>-windows.zip`); the players go next to it.
+  - **Editor pieces to reuse.** It finds its assets beside the executable, and opens the first map in `maps/` when given none.
+- **Phase 17:** the history is in Phase 12's decisions. `mlua` builds for `wasm32-unknown-emscripten` only, which the winit, wgpu and wasm-bindgen build cannot use, and piccolo had no release after June 2024. The platformer's Rust copies of its walker and checkpoint (and the test that checks both play the same) are what a working web Lua replaces.
+- **Phase 18:**
+  - **Today's APK build.** `games/platformer/android/app/build.gradle.kts` runs cargo-ndk and `cg_pack` from Gradle, and the activity is `crates/cg_platform/android/java/com/cashgear/engine/CashGearActivity.java`.
+  - **Signing.** The keystore settings (`CG_ANDROID_*`) and the device checklist are in Phase 11.
+- **Phase 19:** the editor's TMX writer (`tools/cg_editor/src/tmx.rs`) rewrites object layers in place and keeps every other byte; tile layers need the same care.
 
 ## Backlog
 
@@ -1187,8 +1209,9 @@ Features that came up but don't serve the platformer or a listed example go here
 - `QueryFilter` excluding several entities.
 - Platformer extras: more levels, a double jump or dash, collectible gems, enemies that throw things, a level timer leaderboard.
 - Web: uploading to itch.io from CI with butler (needs an API key secret), a service worker for offline play, content-hashed bundle names, the page following the game's language, and cpal's AudioWorklet output (needs cross-origin isolation headers, which GitHub Pages cannot set).
-- Scripting: `require` of other script files, Lua bindings for UI and the locale, a per-frame hook, coroutines that wait across steps (`wait(seconds)`), Luau as an alternative runtime, and scripts on the web through a Lua compiled for `wasm32-unknown-unknown` if one appears.
+- Scripting: a per-frame hook, coroutines that wait across steps (`wait(seconds)`) and Luau as an alternative runtime. (Lua bindings for UI and the locale are now Phase 15, and scripts on the web Phase 17.)
+- Desktop: reading and decoding assets, and decoding streams, on a worker thread.
 - Android: gamepads, a soft keyboard for text fields, GameActivity, Android TV and ChromeOS, keeping clear of rounded screen corners, and Play Asset Delivery if the bundle grows.
 - Releases: Linux and macOS builds of the sample game, Windows code signing, publishing to crates.io (the names were free at 0.1.0), uploading to itch.io with butler, Play Store extras (debug symbols for crash reports, an icon foreground layer).
 - Profiling: scopes for every system without marking them by hand, saving and loading puffin captures, a frame-time graph per scope.
-- Editor: an animation preview (a sheet's clips, an animator's states), a particle preset editor, painting tiles, adding and renaming object layers, reshaping polygons, a clipboard, several open documents in tabs, recent files and saved preferences, native file dialogs, and editing a live entity during Play.
+- Editor: reshaping polygons, a clipboard, several open documents in tabs, native file dialogs, and editing a live entity during Play. (Recent files and saved preferences are now Phase 16. Painting tiles, layers, animation previews and particle previews are Phase 19.)

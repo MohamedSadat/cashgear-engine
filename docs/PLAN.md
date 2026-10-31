@@ -15,6 +15,7 @@ CashGear Engine is a Rust 2D game engine for desktop, web and Android, proven by
 | Gameplay code | Rust first; Lua scripting added late |
 | Tools | Tiled for levels, Aseprite for sprites, own scene editor late |
 | Branching | Every phase committed and pushed to `main` when it ends |
+| After 0.1.0 | A GUI engine: Lua projects made, played and exported in the editor, run by a prebuilt player (phases 15–19) |
 
 ### Tech stack
 
@@ -100,8 +101,11 @@ The engine is one Cargo workspace of small crates behind a single facade crate, 
 | `examples/` | One runnable example per feature | every phase |
 | `games/platformer` | Sample game proving the engine | 9 |
 | `tools/cg_editor` | Desktop scene editor (a library games build in, and a binary) | 13 |
-| `tools/cg_pack` | CLI: atlas packing, asset bundling | 4 |
+| `tools/cg_pack` | CLI: atlas packing, asset bundling (a library too from phase 16) | 4 |
 | `templates/game` | `cargo generate` template for a new game | 14 |
+| `tools/cg_player` | The player: runs a project (scenes, prefabs, Lua, `project.ron`) on every target | 15 |
+| `templates/project` | The starter Lua project the editor copies | 15 |
+| `tools/cg_export` | Exports a project with a prebuilt player for each target (a library and a CLI) | 16 |
 | `benches` | `cg_bench`: frame benchmarks and the allocation check | 14 |
 | `docs/` | `PLAN.md`, `PROGRESS.md`, mdBook guide (`docs/book`, phase 14) | 0 |
 
@@ -351,22 +355,189 @@ These phases add tools for faster content work and finish the engine as a reusab
 
 **Done when:** a new game can be created from the template and run on desktop, web and Android by following the guide.
 
-## After 0.1.0
+## After 0.1.0: a GUI engine
 
 The fifteen phases above are done; 0.1.0 is released. Work continues in the same way, one phase per session, each ending with a push, a tag and the next card.
 
-### Phase 15 — Field testing and 0.2
+In 0.1.0 a game is Rust code built with Cargo, and the editor places things in its levels. Phases 15–19 make CashGear a GUI engine as well. A game becomes a **project**: a folder of scenes, prefabs, Lua scripts and a project file. A prebuilt **player** runs it, and the **editor** creates, plays and exports it, with no Rust, Cargo or terminal. Rust games stay as they are (the template). The player is itself a Rust game on the same plugins, so both kinds of game share every system.
 
-**Goal:** the engine proven on the devices and browsers it claims, and the most-wanted backlog items in, released as 0.2.0.
+Much of it exists already:
 
-- Run the platformer and a game made from the template on a real Android phone (the open Phase 11 checks: lifecycle, audio with headphones and calls, back, cutouts, touch) and fix what fails.
-- Firefox and Safari (desktop and iPhone), with a gamepad; WebGL2 frame times with many sprites in a release build.
-- Take the backlog items the testing or the user asks for first. Candidates: a content-hashed web bundle name and a service worker, Play Store extras (debug symbols, an icon foreground, a signed release from CI), loading and stream decoding on a worker thread on desktop, Android gamepads, UI scroll panels and text fields.
-- Release 0.2.0 with `tools/release.py` and the release workflow.
+- The editor's Play runs physics, animation and Lua on a scene without game code.
+- UI widgets, sprites, bodies and scripts are all prefab components, so screens and characters can be data.
+- A shipped executable reads the `assets.cgpak` beside it, and the web build fetches its bundle.
+- Lua reloads while the game runs.
 
-**Ask:** which devices and browsers are available; which backlog items matter most; whether 0.2 may break the 0.1 API.
+The missing pieces are the player, scene flow and whole-game APIs in Lua, a project manager, exporting, Lua on the web, and editors for tiles, sprites and UI.
 
-**Done when:** the device checklist passes on a phone, the chosen backlog items are in, and v0.2.0 is released.
+**The walkthrough.** These steps are the scope test for every feature in these phases: a feature goes in when a step needs it, and everything else goes to the backlog.
+
+1. Download the editor's zip and run it, with nothing else installed (for Windows and the web; Phase 18 decides what Android needs).
+2. Choose New project. A starter game opens: a title screen, a level, a player and coins in Lua, a HUD and a win screen.
+3. Edit the level, the player's script and a menu. Play runs the whole game from its title screen.
+4. Export a Windows zip, a web zip (also previewed in the browser from the editor) and an Android APK.
+5. The exports run on another PC, in Chrome, Firefox and Safari, and on a phone.
+
+**Releases.** 0.2.0 when Phase 16 ends (the first editor that makes whole games, for Windows), then a minor release after each later phase. Each phase's start asks whether it may break the previous release's API.
+
+### Phase 15 — The player: games without Rust
+
+**Goal:** a prebuilt player runs a whole game made of data and Lua, with no Rust of its own.
+
+- **`project.ron` at the asset root.** It holds:
+  - the title, app id and version;
+  - the window: size, pixel-perfect scale and background;
+  - the first scene and the main script;
+  - the controls (an `ActionMap` in RON) and the on-screen touch controls;
+  - the icon and the default language.
+
+  It is read through serde with defaults, so a minimal file is a few lines, and it has a format version for later changes.
+- **`tools/cg_player`, a library and a binary.** It runs `DefaultPlugins` configured from `project.ron`. It reads the asset folder, or the `assets.cgpak` beside the executable, or the folder `--project <folder>` names. The same crate builds for the web (scripts off until Phase 17) and Android (`android_main!`), so later phases only add exporting.
+- **Scenes.**
+  - `scene.load(path)` in Lua (`SceneManager` in Rust) replaces the current scene with a Tiled map (a level) or a prefab (a screen), with the existing `ScreenFade`.
+  - `scene.overlay(path)` adds a prefab on top (a HUD, a pause menu).
+  - `scene.reload()` and `scene.current()`.
+  - The main script and overlays survive a load.
+- **The main script.** `scripts/main.lua` runs on a persistent entity for the whole game. `events.emit` from any script reaches its `on_event`, so the rules (score, lives, level order) live in Lua instead of Rust.
+- **Lua for whole games,** each a thin layer over what the engine has:
+  - **UI:** `on_click`, `on_focus` and `on_change` hooks on widgets that have scripts; `self:set_text`, `self:set_visible` and `self:set_value`; gamepad focus for menus.
+  - **`camera`:** `follow(entity, opts)` with a dead zone and bounds from the map, `shake`, `set_position` and `zoom`.
+  - **`save`:** `get`, `set` and `remove` of plain Lua values through `Storage`.
+  - **`settings`:** volumes, fullscreen and language (`Locale`).
+  - **`app`:** `quit`, `pause` and `resume` (fixed steps), `time_scale`, `platform()` and `is_touch()`. It is named `app` so it doesn't clash with games' own `game` tables.
+- **`templates/project`,** the starter project the editor will copy: a title screen prefab, a level, a Lua player, coins, a HUD, a win screen, `project.ron` and `main.lua`, with a Lua bot for its test.
+- **The scripting example becomes a project.** Its Rust parts (`game.demo`, the HUD, the win screen, the camera) move into `project.ron`, `main.lua` and prefabs. Its `main.rs` shrinks to a call into `cg_player`, and its bot test still reaches the goal.
+- **The editor's Play learns projects.** With a `project.ron`, Play uses the project's controls and main script instead of `play_controls`.
+
+**Ask:**
+
+- the project file's name and format (RON like everything else, or TOML);
+- whether screens are prefabs, as proposed, or a new scene file that can hold a map and its overlays;
+- how far Lua UI goes in v1: hooks and setters only, or creating widgets from Lua.
+
+**Done when:**
+
+- `cg_player --project templates/project` plays from the title to the level, to the win screen and back to the title on desktop;
+- the starter project's bot test passes headless in CI;
+- the scripting example has no game logic in Rust;
+- the player builds for wasm and Android.
+
+### Phase 16 — The editor as the hub
+
+**Goal:** a project is created, edited, played and exported for Windows from the editor alone.
+
+- **Start screen:** New project (from `templates/project`, built into the editor), Open (a folder with a `project.ron`) and Recent. The editor's own settings are kept with `Storage`.
+- **Project settings window:** everything in `project.ron`. It includes a controls editor (press a key or button to bind it) and a preview of the touch layout.
+- **Two kinds of Play,** both with the main script:
+  - F6 plays the game from its first scene;
+  - F5 plays the open scene, as now.
+
+  Script errors in the console link to their file and line.
+- **New assets from the editor:**
+  - a script, from a template of hooks;
+  - a prefab;
+  - a screen (a UI prefab);
+  - a map, copied from a starter map with its tileset.
+
+  Rename and delete check references (prefab names, and script paths in prefabs and maps).
+- **Scripts:** Edit opens the `.lua` file in the system's editor (VS Code when present), and hot reload applies the change.
+- **`cg_pack` becomes a library** (bundles and atlases) as well as the CLI, so the editor packs bundles itself.
+- **`tools/cg_export`,** a library and a CLI, exports a project for a target from a prebuilt player:
+  - Windows: the player renamed to the game's title and given its icon, `assets.cgpak`, the licences, and a zip;
+  - Linux.
+
+  The CLI lets CI export the starter project and play the result with its bot.
+- **The editor's download** carries the prebuilt players (`players/windows/`, `players/linux/`), which the release workflow builds.
+
+**Ask:**
+
+- whether the download holds a player for every target (a bigger zip) or fetches them on the first export, as Godot does with its export templates;
+- how the exe gets the game's icon (a resource-editing crate, or the player's icon in v1);
+- whether macOS comes now or later (it needs signing to open without warnings).
+
+**Done when:**
+
+- on a Windows PC with only the editor's download, a new project can be made, edited, played and exported, and the export runs on another PC;
+- CI exports the starter project and plays it with its bot;
+- v0.2.0 is released.
+
+### Phase 17 — Scripts on the web, web export
+
+**Goal:** Lua projects run in browsers, and the editor exports and previews web builds.
+
+- **A time-boxed spike comes first.** It is measured against two things the engine already has:
+  - the platformer's bot gives the same result in a browser as on desktop;
+  - `cg_bench`'s 500 scripted bodies stay within twice the desktop time.
+
+  The candidates, in order:
+  1. Lua 5.4 compiled with clang into the engine's own `wasm32-unknown-unknown` module. It needs a small C runtime shim (allocation from Rust, plus the string and math functions Lua calls). The hard part is Lua's error handling (`setjmp`/`longjmp`, or C++ exceptions), which needs WebAssembly exception handling. The `mlua` bindings stay if mlua can be built this way; otherwise a thin binding layer of our own.
+  2. Lua in its own wasm module, called through JavaScript. The bindings are reached through a flat call table: slower per call, but nothing changes in the engine's build.
+  3. A pure-Rust script language (Rhai, or a maintained pure-Rust Lua if one exists by then). Every binding and script is rewritten, and it runs the same on every target.
+  4. The fallback: projects export to the web only without scripts.
+- **One API everywhere.** Whatever wins runs the same API on every target. `cg_script` on the web stops being a stub, and the platformer's Rust copies of its scripted walker and checkpoint go.
+- **Web export in `cg_export`:** the prebuilt web player (`index.html`, the wasm, the loader and the icons) with the project's bundle, title and icons, zipped for itch.io or any static host.
+- **Preview from the editor:** the editor serves the export on a local port and opens the default browser at it.
+- **Browser field testing:** Firefox and Safari (desktop and iPhone) with a gamepad, and WebGL2 frame times with many sprites.
+
+**Ask:**
+
+- which candidate to try first, and how long the spike may take;
+- how much slower than desktop the web may be;
+- the oldest browsers to support (candidate 1 needs WebAssembly exception handling).
+
+**Done when:**
+
+- the starter project and the scripting example, exported from the editor, play with their scripts in Chrome, Firefox and Safari;
+- their bots give the same results as on desktop;
+- the platformer no longer needs Rust copies of its scripts.
+
+### Phase 18 — Android export
+
+**Goal:** the editor exports an Android APK and AAB that install and play on a phone.
+
+- **The prebuilt Android player:** `cg_player` built for arm64-v8a, armeabi-v7a and x86_64 with the engine's activity. The release workflow builds it.
+- **The export path,** decided at the start:
+  - **(a) Patch a prebuilt APK in Rust.** Replace `assets/assets.cgpak`, the app name and id in the binary manifest, and the icons, then align and sign (APK signature v2) with a debug key or the user's key. No SDK is needed, but there is no AAB. Check first which Rust crates for building and signing APKs exist.
+  - **(b) A Gradle project generated by the editor** around the prebuilt libraries, with no Rust or NDK. It is built with the Android SDK and a JDK the editor finds or helps install, and gives AABs for the Play Store.
+- **Keys:** a debug key made on the first export, and a release key created in the editor, kept out of the project, using Phase 11's `CG_ANDROID_*` settings.
+- **Install and run on a connected phone** through adb, when the SDK is present.
+- **The open Phase 11 device checks,** through an exported project: lifecycle, audio with headphones and calls, back, display cutouts, touch and gamepads. Also the frame rate and battery on a mid-range phone.
+
+**Ask:**
+
+- path (a), path (b), or (a) for quick APKs and (b) for store builds;
+- which phones are available;
+- Play Store extras now (debug symbols, the icon's foreground layer, the target SDK policy).
+
+**Done when:**
+
+- a project exported from the editor installs on a phone and plays;
+- the device checklist passes;
+- a signed AAB comes out of the editor.
+
+### Phase 19 — Built-in content editors
+
+**Goal:** a whole game is made in the editor, without Tiled or Aseprite.
+
+- **Tile painting:**
+  - brush, rectangle, fill, eraser and picker on the tile layers of `.tmx` files, written back as Tiled writes them so Tiled still opens them (the editor writes object layers only today);
+  - new maps (size and tile size);
+  - tilesets from a PNG (grid and margins), with per-tile collision (solid, one-way, slope, hazard) and classes;
+  - adding, renaming and ordering layers.
+- **Sprites:**
+  - sheets from a PNG grid or a folder of frames;
+  - clips (frames, durations, looping), previewed;
+  - an `.anim.ron` graph edited as a list of states and transitions.
+- **UI screens:** a UI prefab laid out at the project's resolution and on phone shapes, with widgets dragged in, styles in the inspector, and text with its translations.
+- **Previews:** particles and tweens previewed in the inspector.
+
+**Ask:**
+
+- which editors come first;
+- auto-tiling (Tiled's terrain sets or rules of our own);
+- graph editors now, or lists first.
+
+**Done when:** the starter project's second level, its sprites and a new options screen are made in the editor alone, and Tiled still opens the maps.
 
 ## Quality and risks
 
@@ -398,5 +569,9 @@ A phase is done only when it runs on every target it touches, is tested, documen
 | Android lifecycle and surface loss | Surface-recreation path built in phase 2, tested on device in phase 11 |
 | `mlua` not available on web | Decided in phase 12: web builds keep Rust versions of scripted behaviours, and a test checks both play the same |
 | Crate API churn (`wgpu`, `winit`, `bevy_ecs`) | Pin versions in the workspace; upgrade only between phases |
+| A GUI engine's scope (phases 15–19) | The walkthrough is the scope test: a feature goes in when a step of it needs one; the rest goes to the backlog |
+| No Lua on the web (phase 17) | A time-boxed spike measured against the bot test and `cg_bench`; the fallback exports projects without scripts to the web |
+| Android export needing Java tools (phase 18) | Decided at the phase's start: patch a prebuilt APK in Rust (no SDK), or drive Gradle (the SDK and a JDK) |
+| Rust games and Lua projects drifting apart | The player is a Rust game on the same plugins; the template's game and the starter project both run their bots in CI |
 | Editor grows too large | Fix v1 editor scope in phase 13 questions; Tiled remains the map editor |
 | Arabic/RTL text complexity | Use `cosmic-text` shaping; decide in phase 8 whether RTL is v1 |
